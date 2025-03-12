@@ -1,19 +1,35 @@
+/*
+ * Copyright (C) 2025 TheProgxy <theprogxy@gmail.com>
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #ifndef _K_KOCKET_H_
 #define _K_KOCKET_H_
 
 #include "common_kocket.h"
+#include "./crypto/chacha20.h"
 
 int kocket_write(u32 kocket_client_id, KocketStruct kocket_struct);
-int kocket_read(u32 req_id, KocketStruct* kocket_struct, bool wait_response);
-int kocket_init(Kocket* kocket);
-void kocket_deallocate(Kocket* kocket);
-int kocket_dispatcher(Kocket* kocket);
+int kocket_read(u64 req_id, KocketStruct* kocket_struct, bool wait_response);
+int kocket_init(ServerKocket* kocket);
+void kocket_deallocate(ServerKocket* kocket);
+void kocket_dispatcher(void* kocket_arg);
 
 /* -------------------------------------------------------------------------------------------------------- */
-int kocket_init(Kocket* kocket) {
-	mem_set(kocket, 0, sizeof(Kocket));
-	
-	kocket -> socket = socket(AF_INET, SOCK_STREAM, SOCK_NONBLOCK);
+int kocket_init(ServerKocket* kocket, struct task_struct *kthread) {
+	kocket -> socket = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
 	if (kocket -> socket == -1) {
 		PERROR_LOG("An error occurred while creating the socket");
 		return -KOCKET_IO_ERROR;
@@ -23,7 +39,7 @@ int kocket_init(Kocket* kocket) {
 	kocket -> sock_addr.sin_port = htons(kocket -> port);
 	kocket -> sock_addr.sin_addr.s_addr = htonl(kocket -> kocket_address);
 
-	if (bind(kocket -> socket, (struct sockaddr *)&kocket -> sock_addr, sizeof(kocket -> sock_addr)) < 0) {
+	if (bind(kocket -> socket, (struct sockaddr *) &(kocket -> sock_addr), sizeof(kocket -> sock_addr)) < 0) {
 		close(kocket -> socket);
 		PERROR_LOG("An error occurred while binding the socket");
 		return -KOCKET_IO_ERROR;
@@ -35,24 +51,42 @@ int kocket_init(Kocket* kocket) {
 		return -KOCKET_IO_ERROR;
 	}
 
-	if (use_secure_connection) {
+	// TODO: Implement the algorithms needed for ensuring connection security
+	if (kocket -> use_secure_connection) {
 		WARNING_LOG("The secure connection stack has not been implemented yet.\n");
 		return -KOCKET_TODO;
 	}
 
-	// TODO: Should probably create the thread from here, in that case start the thread and store the thread_pid within a given ptr
+	kocket -> polls = (struct pollfd*) calloc(1, sizeof(struct pollfd));
+	if (kocket -> polls == NULL) {
+		WARNING_LOG("Failed to reallocate the buffer for polls array.\n");
+		return -KOCKET_IO_ERROR;
+	} 
+	
+	(kocket -> polls)[0].fd = kocket -> socket;
+	(kocket -> polls)[0].events = POLLIN;
+
+	kthread = kthread_run(kocket_dispatcher, (void*) kocket, "kocket_kthread");
+	if (kthread == NULL) {
+		WARNING_LOG("Failed to create and run the kthread.\n");
+		return -KOCKET_IO_ERROR;
+	}
 
 	return KOCKET_NO_ERROR;
 }
 
-void kocket_deallocate(Kocket* kocket) {
-	// TODO: Stop the thread if it still running, preventing race conditions on the use of the kocket passed
-	
+int kocket_deallocate(ServerKocket* kocket, KocketStatus status, struct task_struct* kthread) {
+	if (kthread != NULL && kthread -> state != TASK_DEAD) {
+		kthread_stop(kthread);
+		put_task_struct(kthread);
+	}
+
 	kocket_deallocate_queue(&kocket_writing_queue);
 	kocket_deallocate_queue(&kocket_reads_queue);
 	
 	// Close all the clients connections
-	// TODO: Probably should be better to introduce a default type_flag to close the connection
+	// TODO: Probably should be better to introduce a default kocket_type,
+	// to close the connection on both ends instead of closing only from this side
 	for (u32 i = 0; i < kocket -> clients_cnt; ++i) close((kocket -> clients)[i]);
 	
 	SAFE_FREE(kocket -> clients);
@@ -62,21 +96,32 @@ void kocket_deallocate(Kocket* kocket) {
 	// Close the server socket, to prevent incoming connections 
 	close(kocket -> socket);
 	
+	if (down_interruptible(&kocket_status_sem)) {
+        WARNING_LOG("Failed to acquire the semaphore.\n");
+        return -KOCKET_IO_ERROR;
+    }
+	
+	kocket_status = status;
+	
+	up(&kocket_status_sem);
+
 	return KOCKET_NO_ERROR;
 }
 
-int kocket_write(u32 kocket_client_id, KocketStruct kocket_struct) {
-	if ((err = kocket_enqueue(&kocket_writing_queue, kocket_struct, kocket_client_id)) < 0) {
+int kocket_write(u32 kocket_client_id, KocketStruct* kocket_struct) {
+	u8 initialization_vector[64] = {0};
+	kocket_struct -> req_id = *KOCKET_CAST_PTR(cha_cha20(initialization_vector), u64);
+	if ((err = kocket_enqueue(&kocket_writing_queue, *kocket_struct, kocket_client_id)) < 0) {
 		WARNING_LOG("Failed to enqueue the given kocket_struct.\n");
 		return err;
 	}
 	return KOCKET_NO_ERROR;
 }
 
-int kocket_read(u32 req_id, KocketStruct* kocket_struct, bool wait_response) {
+int kocket_read(u64 req_id, KocketStruct* kocket_struct, bool wait_response) {
 	int ret = 0;
 	if ((ret = kocket_queue_find(&kocket_reads_queue, req_id, kocket_struct)) < 0) {
-		WARNING_LOG("An error occurred while finding withing the queue")
+		WARNING_LOG("An error occurred while finding withing the queue.\n");
 		return ret;
 	}
 	
@@ -88,9 +133,9 @@ int kocket_read(u32 req_id, KocketStruct* kocket_struct, bool wait_response) {
 	return KOCKET_NO_ERROR;
 }
 
-static int kocket_send(Kocket kocket, u32 kocket_client_id, KocketStruct kocket_struct) {
+static int kocket_send(ServerKocket kocket, u32 kocket_client_id, KocketStruct kocket_struct) {
 	if (kocket_client_id >= kocket.clients_cnt) {
-		WARNING_LOG("Kocket client if out of bound: %u >= %u.\n", kocket_client_id, kocket.clients_cnt);
+		WARNING_LOG("ServerKocket client if out of bound: %u >= %u.\n", kocket_client_id, kocket.clients_cnt);
 		return -INVALID_KOCKET_CLIENT_ID;
 	}
 	
@@ -116,9 +161,9 @@ static int kocket_send(Kocket kocket, u32 kocket_client_id, KocketStruct kocket_
 	return KOCKET_NO_ERROR;
 }
 
-static int kocket_recv(Kocket kocket, u32 kocket_client_id) {
+static int kocket_recv(ServerKocket kocket, u32 kocket_client_id) {
 	if (kocket_client_id >= kocket.clients_cnt) {
-		WARNING_LOG("Kocket client if out of bound: %u >= %u.\n", kocket_client_id, kocket.clients_cnt);
+		WARNING_LOG("ServerKocket client if out of bound: %u >= %u.\n", kocket_client_id, kocket.clients_cnt);
 		return -INVALID_KOCKET_CLIENT_ID;
 	}
 	
@@ -142,15 +187,12 @@ static int kocket_recv(Kocket kocket, u32 kocket_client_id) {
 	}
 	
 	int ret = 0;
-	if ((ret = type_has_handler(kocket, kocket_struct.type_id)) > KOCKET_HAS_NO_HANDLER) {
+	if (kocket_struct.type_id < kocket -> kocket_types_cnt && (kocket -> kocket_types)[kocket_struct.type_id].has_handler) {
 		if ((ret = (*((kocket.kocket_types)[kocket_struct.type_id].kocket_handler)) (kocket_struct)) < 0) {
 			WARNING_LOG("An error occurred while executing the handler for the type: '%s'\n", (kocket.kocket_types)[kocket_struct.type_id].type_name);
 			return ret;
 		}
-	} else if (ret < 0) {
-		WARNING_LOG("An error occurred while trying to check if type '%s' has an handler.\n", (kocket.kocket_types)[kocket_struct.type_id].type_name);
-		return ret;
-	}
+	} 
 
 	if ((ret = kocket_enqueue(&kocket_writing_queue, kocket_struct, kocket_client_id)) < 0) {
 		WARNING_LOG("Failed to enqueue the given kocket_struct.\n");
@@ -160,58 +202,68 @@ static int kocket_recv(Kocket kocket, u32 kocket_client_id) {
 	return KOCKET_NO_ERROR;
 }
 
+static int kocket_poll_read_accept(ServerKocket* kocket) {
+	int ret = poll(kocket -> polls, kocket -> clients_cnt + 1, KOCKET_TIMEOUT_MS);
+	if (ret < 0) {
+		PERROR_LOG("Failed to perform the read/accept poll");
+		return -KOCKET_IO_ERROR;
+	} else if (ret == 0) return KOCKET_NO_ERROR;
+
+	if ((kocket -> polls)[0].revents & POLLIN) {
+		int new_client = accept4(server_sock, NULL, NULL, SOCK_NONBLOCK);
+		if (new_client > 0) {
+			// TODO: Check if it needs to first establish a secure channel
+			kocket -> clients = (int*) realloc(kocket -> clients, (++(kocket -> clients_cnt)) * sizeof(int));
+			if (kocket -> clients == NULL) {
+				WARNING_LOG("Failed to reallocate the buffer for clients array.\n");
+				return -KOCKET_IO_ERROR;
+			} 
+			
+			(kocket -> clients)[kocket -> clients_cnt - 1] = new_client;
+
+			kocket -> polls = (struct pollfd*) realloc(kocket -> polls, (kocket -> clients_cnt + 1) * sizeof(struct pollfd));
+			if (kocket -> polls == NULL) {
+				WARNING_LOG("Failed to reallocate the buffer for polls array.\n");
+				return -KOCKET_IO_ERROR;
+			} 
+			
+			(kocket -> polls)[kocket -> clients_cnt - 1].fd = new_client;
+			(kocket -> polls)[kocket -> clients_cnt - 1].events = POLLIN;
+		}
+	}
+
+	for (unsigned int i = 1; i < kocket -> clients_cnt + 1; ++i) {
+		if ((kocket -> polls)[i].fd != -1 && ((kocket -> polls)[i].revents & POLLIN) && (err = kocket_recv(*kocket, i) < 0) {
+			close((kocket -> polls)[i].fd);
+			
+			mem_move(kocket -> polls + i, kocket -> polls + i + 1, sizeof(struct pollfd) * (kocket -> clients_cnt - i - 1));
+			mem_move(kocket -> clients + i, kocket -> clients + i + 1, sizeof(int) * (kocket -> clients_cnt - i - 1)); 
+			
+			kocket -> clients = (int*) realloc(kocket -> clients, (--(kocket -> clients_cnt)) * sizeof(int));
+			if (kocket -> clients == NULL) {
+				WARNING_LOG("Failed to reallocate the buffer for clients array.\n");
+				return -KOCKET_IO_ERROR;
+			} 
+			
+			kocket -> polls = (struct pollfd*) realloc(kocket -> polls, (kocket -> clients_cnt + 1) * sizeof(struct pollfd));
+			if (kocket -> polls == NULL) {
+				WARNING_LOG("Failed to reallocate the buffer for polls array.\n");
+				return -KOCKET_IO_ERROR;
+			}
+		}
+	}
+
+	return KOCKET_NO_ERROR;
+}
+
 // This will be the function executed by the kocket-thread.
-// On this function error the function that executes this function in the thread, 
-// should be responsible of calling the init, deallocation and setting the global error status
-int kocket_dispatcher(Kocket* kocket) {
-	while (TRUE) {
-		int ret = poll(kocket -> polls, kocket -> clients_cnt + 1, KOCKET_TIMEOUT_MS);
-		if (ret < 0) {
-			PERROR_LOG("Failed to perform the read/accept poll");
-			return -KOCKET_IO_ERROR;
-		} else if (ret != 0) {
-			if ((kocket -> polls)[0].revents & POLLIN) {
-				int new_client = accept4(server_sock, NULL, NULL, SOCK_NONBLOCK);
-				if (new_client > 0) {
-					kocket -> clients = (int*) realloc(kocket -> clients, (++(kocket -> clients_cnt)) * sizeof(int));
-					if (kocket -> clients == NULL) {
-						WARNING_LOG("Failed to reallocate the buffer for clients array.\n");
-						return -KOCKET_IO_ERROR;
-					} 
-					
-					(kocket -> clients)[kocket -> clients_cnt - 1] = new_client;
-
-					kocket -> polls = (struct pollfd*) realloc(kocket -> polls, (kocket -> clients_cnt + 1) * sizeof(struct pollfd));
-					if (kocket -> polls == NULL) {
-						WARNING_LOG("Failed to reallocate the buffer for polls array.\n");
-						return -KOCKET_IO_ERROR;
-					} 
-					
-					(kocket -> polls)[kocket -> clients_cnt - 1].fd = new_client;
-					(kocket -> polls)[kocket -> clients_cnt - 1].events = POLLIN;
-				}
-			}
-
-			for (unsigned int i = 1; i < kocket -> clients_cnt + 1; ++i) {
-				if ((kocket -> polls)[i].fd != -1 && ((kocket -> polls)[i].revents & POLLIN) && (err = kocket_recv(*kocket, i)) {
-					mem_move(kocket -> polls + i, kocket -> polls + i + 1, sizeof(struct pollfd) * (kocket -> clients_cnt - i - 1));
-					mem_move(kocket -> clients + i, kocket -> clients + i + 1, sizeof(int) * (kocket -> clients_cnt - i - 1)); 
-					
-					kocket -> clients = (int*) realloc(kocket -> clients, (--(kocket -> clients_cnt)) * sizeof(int));
-					if (kocket -> clients == NULL) {
-						WARNING_LOG("Failed to reallocate the buffer for clients array.\n");
-						return -KOCKET_IO_ERROR;
-					} 
-					
-					kocket -> polls = (struct pollfd*) realloc(kocket -> polls, (kocket -> clients_cnt + 1) * sizeof(struct pollfd));
-					if (kocket -> polls == NULL) {
-						WARNING_LOG("Failed to reallocate the buffer for polls array.\n");
-						return -KOCKET_IO_ERROR;
-					}
-
-					close((kocket -> polls)[i].fd);
-				}
-			}
+void kocket_dispatcher(void* kocket_arg) {
+	ServerKocket* kocket = (ServerKocket*) kocket_arg;
+	while (!kthread_should_stop()) {
+		if ((ret = kocket_poll_read_accept(kocket)) < 0) {ret
+			kocket_deallocate(kocket, ret, NULL);
+			WARNING_LOG("An error occurred while polling read/accept.\n");
+			return;
 		}
 
 		if ((err = is_kocket_queue_empty(&kocket_writing_queue)) > 0) {
@@ -219,18 +271,21 @@ int kocket_dispatcher(Kocket* kocket) {
 				u32 kocket_client_id = 0;
 				KocketStruct kocket_struct = {0};
 				if ((err = kocket_dequeue(kocket_writing_queue, &kocket_struct, &kocket_client_id)) < 0) {
+					kocket_deallocate(kocket, err, NULL);
 					WARNING_LOG("Failed to dequeue from the kocket_writing_queue.\n");
-					return err;
+					return;
 				}
 				
 				if ((err = kocket_send(*kocket, kocket_client_id, kocket_struct)) < 0) {
+					kocket_deallocate(kocket, err, NULL);
 					WARNING_LOG("Failed to send the queued kocket_struct.\n");
-					return err;
+					return;
 				}
 			}
 		} else if (err < 0) {
+			kocket_deallocate(kocket, err, NULL);
 			WARNING_LOG("An error occurred while checking if the kocket_writing_queue was empty.\n");
-			return err;
+			return;
 		}
 	}
 	
