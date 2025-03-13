@@ -21,10 +21,16 @@
 #include "common_kocket.h"
 #include "./crypto/chacha20.h"
 
-int kocket_write(u32 kocket_client_id, KocketStruct kocket_struct);
-int kocket_read(u64 req_id, KocketStruct* kocket_struct, bool wait_response);
+// ------------------------
+//  Functions Declarations
+// ------------------------
 int kocket_init(ServerKocket* kocket, struct task_struct *kthread);
-void kocket_deinit(ServerKocket* kocket);
+int kocket_deinit(ServerKocket* kocket, KocketStatus status, struct task_struct* kthread);
+int kocket_write(u32 kocket_client_id, KocketStruct* kocket_struct);
+int kocket_read(u64 req_id, KocketStruct* kocket_struct, bool wait_response);
+static int kocket_send(ServerKocket kocket, u32 kocket_client_id, KocketStruct kocket_struct);
+static int kocket_recv(ServerKocket kocket, u32 kocket_client_id) ;
+static int kocket_poll_read_accept(ServerKocket* kocket);
 void kocket_dispatcher(void* kocket_arg);
 
 /* -------------------------------------------------------------------------------------------------------- */
@@ -57,9 +63,9 @@ int kocket_init(ServerKocket* kocket, struct task_struct *kthread) {
 		return -KOCKET_TODO;
 	}
 
-	kocket -> polls = (struct pollfd*) calloc(1, sizeof(struct pollfd));
+	kocket -> polls = (struct pollfd*) kocket_calloc(1, sizeof(struct pollfd));
 	if (kocket -> polls == NULL) {
-		WARNING_LOG("Failed to reallocate the buffer for polls array.\n");
+		WARNING_LOG("Failed to allocate the buffer for polls array.\n");
 		return -KOCKET_IO_ERROR;
 	} 
 	
@@ -91,8 +97,8 @@ int kocket_deinit(ServerKocket* kocket, KocketStatus status, struct task_struct*
 	// to close the connection on both ends instead of closing only from this side
 	for (u32 i = 0; i < kocket -> clients_cnt; ++i) close((kocket -> clients)[i]);
 	
-	SAFE_FREE(kocket -> clients);
-	SAFE_FREE(kocket -> polls);
+	KOCKET_SAFE_FREE(kocket -> clients);
+	KOCKET_SAFE_FREE(kocket -> polls);
 	kocket -> clients_cnt = 0;
 	
 	// Close the server socket, to prevent incoming connections 
@@ -141,7 +147,7 @@ static int kocket_send(ServerKocket kocket, u32 kocket_client_id, KocketStruct k
 	}
 	
 	u32 payload_size = sizeof(KocketStruct) - sizeof(u8*) + kocket_struct.payload_size;
-	void* payload = calloc(payload_size, sizeof(u8));
+	void* payload = kocket_calloc(payload_size, sizeof(u8));
 	if (payload == NULL) {
 		WARNING_LOG("Failed to allocate the buffer for the payload.\n");
 		return -KOCKET_IO_ERROR;
@@ -151,12 +157,12 @@ static int kocket_send(ServerKocket kocket, u32 kocket_client_id, KocketStruct k
 	mem_cpy(payload + sizeof(KocketStruct) - sizeof(u8*), kocket_struct.payload, kocket.payload_size);
 
 	if (send((kocket.clients)[kocket_client_id], payload, payload_size, 0) < (ssize_t) payload_size) {
-		SAFE_FREE(payload);
+		KOCKET_SAFE_FREE(payload);
 		PERROR_LOG("An error occurred while sending %u bytes to client %u", data_size, kocket_client_id);
 		return -KOCKET_IO_ERROR;
 	}
 	
-	SAFE_FREE(payload);
+	KOCKET_SAFE_FREE(payload);
 
 	return KOCKET_NO_ERROR;
 }
@@ -174,14 +180,14 @@ static int kocket_recv(ServerKocket kocket, u32 kocket_client_id) {
 		return -KOCKET_IO_ERROR;
 	}
 
-	kocket_struct.payload = (u8*) calloc(kocket_struct.payload_size, sizeof(u8));
+	kocket_struct.payload = (u8*) kocket_calloc(kocket_struct.payload_size, sizeof(u8));
 	if (kocket_struct.payload == NULL) {
 		WARNING_LOG("An error occurred while allocating the buffer for the payload.\n");
 		return -KOCKET_IO_ERROR;
 	}
 	
 	if (recv((kocket.clients)[kocket_client_id], kocket_struct.payload, kocket_struct.payload_size, 0) < kocket_struct.payload_size) {
-		SAFE_FREE(kocket_struct -> payload);
+		KOCKET_SAFE_FREE(kocket_struct -> payload);
 		PERROR_LOG("An error occurred while reading from the client.\n");
 		return -KOCKET_IO_ERROR;
 	}
@@ -213,7 +219,7 @@ static int kocket_poll_read_accept(ServerKocket* kocket) {
 		int new_client = accept4(server_sock, NULL, NULL, SOCK_NONBLOCK);
 		if (new_client > 0) {
 			// TODO: Check if it needs to first establish a secure channel
-			kocket -> clients = (int*) realloc(kocket -> clients, (++(kocket -> clients_cnt)) * sizeof(int));
+			kocket -> clients = (int*) kocket_realloc(kocket -> clients, (++(kocket -> clients_cnt)) * sizeof(int));
 			if (kocket -> clients == NULL) {
 				WARNING_LOG("Failed to reallocate the buffer for clients array.\n");
 				return -KOCKET_IO_ERROR;
@@ -221,7 +227,7 @@ static int kocket_poll_read_accept(ServerKocket* kocket) {
 			
 			(kocket -> clients)[kocket -> clients_cnt - 1] = new_client;
 
-			kocket -> polls = (struct pollfd*) realloc(kocket -> polls, (kocket -> clients_cnt + 1) * sizeof(struct pollfd));
+			kocket -> polls = (struct pollfd*) kocket_realloc(kocket -> polls, (kocket -> clients_cnt + 1) * sizeof(struct pollfd));
 			if (kocket -> polls == NULL) {
 				WARNING_LOG("Failed to reallocate the buffer for polls array.\n");
 				return -KOCKET_IO_ERROR;
@@ -239,13 +245,13 @@ static int kocket_poll_read_accept(ServerKocket* kocket) {
 			mem_move(kocket -> polls + i, kocket -> polls + i + 1, sizeof(struct pollfd) * (kocket -> clients_cnt - i - 1));
 			mem_move(kocket -> clients + i, kocket -> clients + i + 1, sizeof(int) * (kocket -> clients_cnt - i - 1)); 
 			
-			kocket -> clients = (int*) realloc(kocket -> clients, (--(kocket -> clients_cnt)) * sizeof(int));
+			kocket -> clients = (int*) kocket_realloc(kocket -> clients, (--(kocket -> clients_cnt)) * sizeof(int));
 			if (kocket -> clients == NULL) {
 				WARNING_LOG("Failed to reallocate the buffer for clients array.\n");
 				return -KOCKET_IO_ERROR;
 			} 
 			
-			kocket -> polls = (struct pollfd*) realloc(kocket -> polls, (kocket -> clients_cnt + 1) * sizeof(struct pollfd));
+			kocket -> polls = (struct pollfd*) kocket_realloc(kocket -> polls, (kocket -> clients_cnt + 1) * sizeof(struct pollfd));
 			if (kocket -> polls == NULL) {
 				WARNING_LOG("Failed to reallocate the buffer for polls array.\n");
 				return -KOCKET_IO_ERROR;

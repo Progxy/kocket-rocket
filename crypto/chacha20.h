@@ -107,18 +107,22 @@ void cha_cha20_randomize(u8 key[256], u8 nonce[96], u8 random_data[64]) {
 	return;
 }
 
-u8* cha_cha20(u8 initialization_vector[64]) {
+u8* cha_cha20(u8 random_data[64]) {
 	u64 key[64] = {0};
    	u32 nonce[24] = {0};
-	mem_set(initialization_vector, 0, 64 * sizeof(u8));
+	mem_set(random_data, 0, 64 * sizeof(u8));
 
-	int is_supported_rdseed = is_rdseed_supported(is_supported_rdseed);
-    int is_supported_rdrand = is_rdrand_supported(is_supported_rdrand);
+	int is_supported_rdseed = is_rdseed_supported();
+    int is_supported_rdrand = is_rdrand_supported();
     if (!is_supported_rdrand) {
         WARNING_LOG("CHACHA20: RDRAND is UNSUPPORTED.\n");
         if (!is_supported_rdseed) WARNING_LOG("CHACHA20: RDSEED is UNSUPPORTED.\n");
         srand(time(NULL));
-		return (rand() << 32 | rand());
+		u32 rand_value = rand();
+		mem_cpy(random_data, &rand_value, sizeof(u32));
+		rand_value = rand();
+		mem_cpy(random_data + sizeof(u32), &rand_value, sizeof(u32));
+		return random_data;
     } else if (!is_supported_rdseed) DEBUG_LOG("CHACHA20: RDSEED is UNSUPPORTED.\n");
 
 	for (u8 i = 0; i < 64; ++i) {
@@ -126,7 +130,7 @@ u8* cha_cha20(u8 initialization_vector[64]) {
 		if (i < 24) nonce[i] = get_seed32(is_supported_rdseed);
 	}
 
-	cha_cha20_randomize((u8*) key, (u8*) nonce, initialization_vector);
+	cha_cha20_randomize((u8*) key, (u8*) nonce, random_data);
 
 	return random_data; 
 }
