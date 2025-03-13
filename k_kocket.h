@@ -23,8 +23,8 @@
 
 int kocket_write(u32 kocket_client_id, KocketStruct kocket_struct);
 int kocket_read(u64 req_id, KocketStruct* kocket_struct, bool wait_response);
-int kocket_init(ServerKocket* kocket);
-void kocket_deallocate(ServerKocket* kocket);
+int kocket_init(ServerKocket* kocket, struct task_struct *kthread);
+void kocket_deinit(ServerKocket* kocket);
 void kocket_dispatcher(void* kocket_arg);
 
 /* -------------------------------------------------------------------------------------------------------- */
@@ -66,6 +66,8 @@ int kocket_init(ServerKocket* kocket, struct task_struct *kthread) {
 	(kocket -> polls)[0].fd = kocket -> socket;
 	(kocket -> polls)[0].events = POLLIN;
 
+	mutex_init(&kocket_status_lock);
+
 	kthread = kthread_run(kocket_dispatcher, (void*) kocket, "kocket_kthread");
 	if (kthread == NULL) {
 		WARNING_LOG("Failed to create and run the kthread.\n");
@@ -75,7 +77,7 @@ int kocket_init(ServerKocket* kocket, struct task_struct *kthread) {
 	return KOCKET_NO_ERROR;
 }
 
-int kocket_deallocate(ServerKocket* kocket, KocketStatus status, struct task_struct* kthread) {
+int kocket_deinit(ServerKocket* kocket, KocketStatus status, struct task_struct* kthread) {
 	if (kthread != NULL && kthread -> state != TASK_DEAD) {
 		kthread_stop(kthread);
 		put_task_struct(kthread);
@@ -96,14 +98,11 @@ int kocket_deallocate(ServerKocket* kocket, KocketStatus status, struct task_str
 	// Close the server socket, to prevent incoming connections 
 	close(kocket -> socket);
 	
-	if (down_interruptible(&kocket_status_sem)) {
-        WARNING_LOG("Failed to acquire the semaphore.\n");
-        return -KOCKET_IO_ERROR;
-    }
+	mutex_lock(&kocket_status_lock);
 	
 	kocket_status = status;
 	
-	up(&kocket_status_sem);
+	mutex_unlock(&kocket_status_lock);
 
 	return KOCKET_NO_ERROR;
 }
@@ -127,6 +126,8 @@ int kocket_read(u64 req_id, KocketStruct* kocket_struct, bool wait_response) {
 	
 	if (ret == KOCKET_REQ_NOT_FOUND && wait_response) {
 		// TODO: find a way to wait until the response with matching req_id arrives.
+		// It probably needs to have a waiter queue, for which it waits on the semaphore of its waiter entry (which locks cause will be initialized to 0);
+		// Furthermore, the waiter will be woken when the enqueue operation finds that someone was waiting for the enqueued resource, calling semaphore_up.
 		return KOCKET_NO_ERROR;
 	} else if (ret == KOCKET_REQ_NOT_FOUND) return KOCKET_NO_ERROR;
 
@@ -149,7 +150,6 @@ static int kocket_send(ServerKocket kocket, u32 kocket_client_id, KocketStruct k
 	mem_cpy(payload, kocket_struct, sizeof(KocketStruct) - sizeof(u8*));
 	mem_cpy(payload + sizeof(KocketStruct) - sizeof(u8*), kocket_struct.payload, kocket.payload_size);
 
-	// TODO: Check if setting the following with the NON-BLOCKING flag would be useful
 	if (send((kocket.clients)[kocket_client_id], payload, payload_size, 0) < (ssize_t) payload_size) {
 		SAFE_FREE(payload);
 		PERROR_LOG("An error occurred while sending %u bytes to client %u", data_size, kocket_client_id);
@@ -261,29 +261,30 @@ void kocket_dispatcher(void* kocket_arg) {
 	ServerKocket* kocket = (ServerKocket*) kocket_arg;
 	while (!kthread_should_stop()) {
 		if ((ret = kocket_poll_read_accept(kocket)) < 0) {ret
-			kocket_deallocate(kocket, ret, NULL);
+			kocket_deinit(kocket, ret, NULL);
 			WARNING_LOG("An error occurred while polling read/accept.\n");
 			return;
 		}
 
-		if ((err = is_kocket_queue_empty(&kocket_writing_queue)) > 0) {
-			for (kocket_writing_queue.size > 0) {
-				u32 kocket_client_id = 0;
-				KocketStruct kocket_struct = {0};
-				if ((err = kocket_dequeue(kocket_writing_queue, &kocket_struct, &kocket_client_id)) < 0) {
-					kocket_deallocate(kocket, err, NULL);
-					WARNING_LOG("Failed to dequeue from the kocket_writing_queue.\n");
-					return;
-				}
-				
-				if ((err = kocket_send(*kocket, kocket_client_id, kocket_struct)) < 0) {
-					kocket_deallocate(kocket, err, NULL);
-					WARNING_LOG("Failed to send the queued kocket_struct.\n");
-					return;
-				}
+		// TODO: As the send operations are non-blocking, we should probably also check using polling if we can send data.
+		while ((err = is_kocket_queue_empty(&kocket_writing_queue)) > 0) {
+			u32 kocket_client_id = 0;
+			KocketStruct kocket_struct = {0};
+			if ((err = kocket_dequeue(kocket_writing_queue, &kocket_struct, &kocket_client_id)) < 0) {
+				kocket_deinit(kocket, err, NULL);
+				WARNING_LOG("Failed to dequeue from the kocket_writing_queue.\n");
+				return;
 			}
-		} else if (err < 0) {
-			kocket_deallocate(kocket, err, NULL);
+			
+			if ((err = kocket_send(*kocket, kocket_client_id, kocket_struct)) < 0) {
+				kocket_deinit(kocket, err, NULL);
+				WARNING_LOG("Failed to send the queued kocket_struct.\n");
+				return;
+			}
+		}
+
+		if (err < 0) {
+			kocket_deinit(kocket, err, NULL);
 			WARNING_LOG("An error occurred while checking if the kocket_writing_queue was empty.\n");
 			return;
 		}

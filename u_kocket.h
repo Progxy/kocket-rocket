@@ -20,15 +20,16 @@
 
 #include "common_kocket.h"
 #include "./crypto/chacha20.h"
+#include <pthread.h>
 
 int kocket_write(u32 kocket_client_id, KocketStruct kocket_struct);
 int kocket_read(u64 req_id, KocketStruct* kocket_struct, bool wait_response);
 int kocket_init(ClientKocket* kocket);
-void kocket_deallocate(ClientKocket* kocket);
+void kocket_deinit(ClientKocket* kocket);
 void kocket_dispatcher(void* kocket_arg);
 
 /* -------------------------------------------------------------------------------------------------------- */
-int kocket_init(ClientKocket* kocket, struct task_struct *kthread) {
+int kocket_init(ClientKocket* kocket, pthread_t* pthread) {
 	if ((kocket -> socket = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
 		PERROR_LOG("An error occurred while creating the socket");
 		return -KOCKET_IO_ERROR;
@@ -53,25 +54,34 @@ int kocket_init(ClientKocket* kocket, struct task_struct *kthread) {
 	kocket -> poll_fd.fd = kocket -> socket;
 	kocket -> poll_fd.events = POLLIN;
 
+	mutex_init(&kocket_status_lock);
+	
 	// TODO: Implement the algorithms needed for ensuring connection security
 	if (kocket -> use_secure_connection) {
 		WARNING_LOG("The secure connection stack has not been implemented yet.\n");
 		return -KOCKET_TODO;
 	}
-
-	kthread = kthread_run(kocket_dispatcher, (void*) kocket, "kocket_kthread");
-	if (kthread == NULL) {
-		WARNING_LOG("Failed to create and run the kthread.\n");
+	
+	if (pthread_create(pthread, NULL, kocket_dispatcher (void*) kocket) != 0) {
+		WARNING_LOG("Failed to create the pthread.\n");
 		return -KOCKET_IO_ERROR;
 	}
 
 	return KOCKET_NO_ERROR;
 }
 
-int kocket_deallocate(ClientKocket* kocket, KocketStatus status, struct task_struct* kthread) {
-	if (kthread != NULL && kthread -> state != TASK_DEAD) {
-		kthread_stop(kthread);
-		put_task_struct(kthread);
+int kocket_deinit(ClientKocket* kocket, KocketStatus status, pthread_t thread) {
+	stop_thread();
+	
+	int err = 0;
+	if (pthread_join(thread, &err)) {
+		WARNING_LOG("An error occurred while joining the thread.\n");
+		return -KOCKET_IO_ERROR;
+	}
+
+	if (err < 0) {
+		WARNING_LOG("The kocket_thread failed during execution.\n");
+		return err;
 	}
 
 	kocket_deallocate_queue(&kocket_writing_queue);
@@ -84,14 +94,9 @@ int kocket_deallocate(ClientKocket* kocket, KocketStatus status, struct task_str
 	
 	close(kocket -> socket);
 	
-	if (down_interruptible(&kocket_status_sem)) {
-        WARNING_LOG("Failed to acquire the semaphore.\n");
-        return -KOCKET_IO_ERROR;
-    }
-	
+	mutex_lock(&kocket_status_lock);
 	kocket_status = status;
-	
-	up(&kocket_status_sem);
+	mutex_destroy(&kocket_status_lock);
 
 	return KOCKET_NO_ERROR;
 }
@@ -179,42 +184,58 @@ static int kocket_recv(ClientKocket kocket) {
 	return KOCKET_NO_ERROR;
 }
 
+static void stop_thread(void) {
+	mutex_lock(&kocket_status_lock); 
+    kocket_status = KOCKET_THREAD_STOP; 
+	mutex_unlock(&kocket_status_lock);
+	return;
+}
+
+static bool thread_should_stop() {
+	bool status = TRUE;
+	mutex_lock(&kocket_status_lock); 
+    status = kocket_status; 
+	mutex_unlock(&kocket_status_lock);
+	return status;
+}
+
 // This will be the function executed by the kocket-thread.
-void kocket_dispatcher(void* kocket_arg) {
+void* kocket_dispatcher(void* kocket_arg) {
 	int err = 0;
 	ClientKocket* kocket = (ClientKocket*) kocket_arg;
-	while (!kthread_should_stop()) {
+	while (thread_should_stop()) {
 		int ret = poll(kocket -> poll_fd, 1, KOCKET_TIMEOUT_MS);
 		if (ret < 0) {
-			kocket_deallocate(kocket, -KOCKET_IO_ERROR, NULL);
 			PERROR_LOG("Failed to perform the read/accept poll");
-			return;
+			stop_thread();
+			return -KOCKET_IO_ERROR;
 		} else if (ret != 0 && ((kocket -> poll_fd)[i].revents & POLLIN) && (err = kocket_recv(*kocket)) < 0) {
-			kocket_deallocate(kocket, err, NULL);
 			WARNING_LOG("An error occurred while receiving.\n");
-			return; 
+			stop_thread();
+			return err; 
 		}
 		
-		if ((err = is_kocket_queue_empty(&kocket_writing_queue)) > 0) {
-			for (kocket_writing_queue.size > 0) {
-				u32 kocket_client_id = 0;
-				KocketStruct kocket_struct = {0};
-				if ((err = kocket_dequeue(kocket_writing_queue, &kocket_struct, &kocket_client_id)) < 0) {
-					kocket_deallocate(kocket, err, NULL);
-					WARNING_LOG("Failed to dequeue from the kocket_writing_queue.\n");
-					return;
-				}
-				
-				if ((err = kocket_send(*kocket, kocket_struct)) < 0) {
-					kocket_deallocate(kocket, err, NULL);
-					WARNING_LOG("Failed to send the queued kocket_struct.\n");
-					return;
-				}
+		// TODO: As the send operations are non-blocking, we should probably also check using polling if we can send data.
+		while ((err = is_kocket_queue_empty(&kocket_writing_queue)) > 0) {
+			u32 kocket_client_id = 0;
+			KocketStruct kocket_struct = {0};
+			if ((err = kocket_dequeue(kocket_writing_queue, &kocket_struct, &kocket_client_id)) < 0) {
+				WARNING_LOG("Failed to dequeue from the kocket_writing_queue.\n");
+				stop_thread();
+				return err;
 			}
-		} else if (err < 0) {
-			kocket_deallocate(kocket, err, NULL);
+			
+			if ((err = kocket_send(*kocket, kocket_struct)) < 0) {
+				WARNING_LOG("Failed to send the queued kocket_struct.\n");
+				stop_thread();
+				return err;
+			}
+		}
+		
+		if (err < 0) {
 			WARNING_LOG("An error occurred while checking if the kocket_writing_queue was empty.\n");
-			return;
+			stop_thread();
+			return err;
 		}
 	}
 	

@@ -54,6 +54,17 @@
 typedef enum KocketStatus { KOCKET_NO_ERROR = 0, KOCKET_IO_ERROR, KOCKET_TODO } KocketStatus;
 static const char* kocket_status_str[] = { "KOCKET_NO_ERROR", "KOCKET_IO_ERROR", "KOCKET_TODO" };
 
+#ifdef _U_KOCKET_H_
+	typedef pthread_mutex_t mutex_t;
+	#define mutex_init(mutex_lock)    pthread_mutex_init(mutex_lock, NULL)
+	#define mutex_lock(mutex_lock)    pthread_mutex_lock(mutex_lock)
+	#define mutex_unlock(mutex_lock)  pthread_mutex_unlock(mutex_lock)
+	#define mutex_destroy(mutex_lock) pthread_mutex_destroy(mutex_lock)
+#else
+	typedef struct mutex mutex_t;
+	#define mutex_destroy(mutex_lock)
+#endif //_U_KOCKET_H_
+
 typedef struct PACKED_STRUCT KocketStruct {
 	u32 type_id;
 	u64 req_id;
@@ -95,7 +106,7 @@ typedef struct ClientKocket {
 typedef struct KocketQueue {
 	KocketStruct* kocket_structs;
 	u32* kocket_clients_ids;
-	struct semaphore sem; // TODO: add guard to switch between the userspace and kernelspace version
+	mutex_t lock;
 	u32 size;
 } KocketQueue;
 
@@ -108,9 +119,8 @@ typedef struct KocketQueue {
 static KocketQueue kocket_writing_queue = {0};
 static KocketQueue kocket_reads_queue = {0};
 
-// TODO: add guard to switch between the userspace and kernelspace version
-static struct semaphore kocket_status_sem = {0};
 static KocketStatus kocket_status = KOCKET_NO_ERROR;
+static mutex_t kocket_status_lock = {0};
 
 /* -------------------------------------------------------------------------------------------------------- */
 int kocket_init_queue(KocketQueue* kocket_queue) {
@@ -122,7 +132,8 @@ int kocket_init_queue(KocketQueue* kocket_queue) {
 	kocket_queue -> kocket_structs = NULL;
 	kocket_queue -> kocket_clients_ids = NULL;
 	kocket_queue -> size = 0;
-	sema_init(&(kocket_queue -> sem), 1);
+
+	mutex_init(&(kocket_queue -> lock));
 
 	return KOCKET_NO_ERROR;
 }
@@ -133,17 +144,14 @@ int kocket_deallocate_queue(KocketQueue* kocket_queue) {
 		return -KOCKET_IO_ERROR;
 	}
 
-	if (down_interruptible(&(kocket_queue -> sem))) {
-        WARNING_LOG("Failed to acquire the semaphore.\n");
-        return -KOCKET_IO_ERROR;
-    }
+	mutex_lock(&(kocket_queue -> lock));
 	
 	for (u32 i = 0; i < kocket_queue -> size; ++i) SAFE_FREE((kocket_queue -> kocket_structs)[i].payload);
 	SAFE_FREE(kocket_queue -> kocket_structs);
 	SAFE_FREE(kocket_queue -> kocket_clients_ids);
 	kocket_queue -> size = 0;
 	
-	up(&(kocket_queue -> sem));
+	mutex_destroy(&(kocket_queue -> lock));
 
 	return KOCKET_NO_ERROR;
 }
@@ -154,10 +162,7 @@ int kocket_enqueue(KocketQueue* kocket_queue, KocketStruct kocket_struct, u32 ko
 		return -KOCKET_IO_ERROR;
 	}
 
-	if (down_interruptible(&(kocket_queue -> sem))) {
-        WARNING_LOG("Failed to acquire the semaphore.\n");
-        return -KOCKET_IO_ERROR;
-    }
+	mutex_lock(&(kocket_queue -> lock));
 	
 	kocket_queue -> kocket_structs = realloc(kocket_queue -> kocket_structs, sizeof(KocketStruct) * (++(kocket_queue -> size)));
 	if (kocket_queue -> kocket_structs == NULL) {
@@ -175,7 +180,7 @@ int kocket_enqueue(KocketQueue* kocket_queue, KocketStruct kocket_struct, u32 ko
 	
 	(kocket_queue -> kocket_clients_ids)[kocket_queue -> size - 1] = kocket_client_id;
 		
-	up(&(kocket_queue -> sem));
+	mutex_unlock(&(kocket_queue -> lock));
 
 	return KOCKET_NO_ERROR;
 }
@@ -186,10 +191,7 @@ int kocket_dequeue(KocketQueue* kocket_queue, KocketStruct* kocket_struct, u32* 
 		return -KOCKET_IO_ERROR;
 	}
 
-	if (down_interruptible(&(kocket_queue -> sem))) {
-        WARNING_LOG("Failed to acquire the semaphore.\n");
-        return -KOCKET_IO_ERROR;
-    }
+	mutex_lock(&(kocket_queue -> lock));
 	
    	*kocket_struct = (kocket_queue -> kocket_structs)[kocket_queue -> size - 1];
    	*kocket_client_id = (kocket_queue -> kocket_clients_ids)[kocket_queue -> size - 1];
@@ -206,7 +208,7 @@ int kocket_dequeue(KocketQueue* kocket_queue, KocketStruct* kocket_struct, u32* 
 		return -KOCKET_IO_ERROR;
 	}
 		
-	up(&(kocket_queue -> sem));
+	mutex_unlock(&(kocket_queue -> lock));
 	
 	return KOCKET_NO_ERROR;
 }
@@ -217,14 +219,11 @@ int is_kocket_queue_empty(KocketQueue* kocket_queue) {
 		return -KOCKET_IO_ERROR;
 	}
 
-	if (down_interruptible(&(kocket_queue -> sem))) {
-        WARNING_LOG("Failed to acquire the semaphore.\n");
-        return -KOCKET_IO_ERROR;
-    }
+	mutex_lock(&(kocket_queue -> lock));
 	
 	u32 queue_size = kocket_queue -> size;
-
-	up(&(kocket_queue -> sem));
+	
+	mutex_unlock(&(kocket_queue -> lock));
 	
 	return queue_size;
 }
@@ -235,10 +234,7 @@ int kocket_dequeue_find(KocketQueue* kocket_queue, u64 req_id, KocketStruct* koc
 		return -KOCKET_IO_ERROR;
 	}
 
-	if (down_interruptible(&(kocket_queue -> sem))) {
-        WARNING_LOG("Failed to acquire the semaphore.\n");
-        return -KOCKET_IO_ERROR;
-    }
+	mutex_lock(&(kocket_queue -> lock));
 	
 	for (index = 0; i < kocket_queue -> size; ++i) {
 		if ((kocket_queue -> kocket_structs)[i].req_id == req_id) break;
@@ -266,7 +262,7 @@ int kocket_dequeue_find(KocketQueue* kocket_queue, u64 req_id, KocketStruct* koc
 		return -KOCKET_IO_ERROR;
 	}
 		
-	up(&(kocket_queue -> sem));
+	mutex_unlock(&(kocket_queue -> lock));
 
 	return KOCKET_NO_ERROR;
 }
