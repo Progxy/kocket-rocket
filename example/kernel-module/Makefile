@@ -1,4 +1,4 @@
-obj-m += kernel_example.o
+obj-m += example.o
 example-y += example_entry.o 
 
 kernel_example: 

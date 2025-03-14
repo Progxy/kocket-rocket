@@ -66,7 +66,7 @@ int kocket_init(ClientKocket* kocket, pthread_t* pthread) {
 	// TODO: Implement the algorithms needed for ensuring connection security
 	if (kocket -> use_secure_connection) {
 		close(kocket -> socket);
-		mutex_destroy(&kocket_status_destroy);
+		mutex_destroy(&kocket_status_lock);
 		WARNING_LOG("The secure connection stack has not been implemented yet.\n");
 		return -KOCKET_TODO;
 	}
@@ -76,7 +76,7 @@ int kocket_init(ClientKocket* kocket, pthread_t* pthread) {
 
 	if (pthread_create(pthread, NULL, kocket_dispatcher, (void*) kocket) != 0) {
 		close(kocket -> socket);
-		mutex_destroy(&kocket_status_destroy);
+		mutex_destroy(&kocket_status_lock);
 		kocket_deallocate_queue(&kocket_writing_queue);
 		kocket_deallocate_queue(&kocket_reads_queue);
 		WARNING_LOG("Failed to create the pthread.\n");
@@ -87,21 +87,21 @@ int kocket_init(ClientKocket* kocket, pthread_t* pthread) {
 }
 
 int kocket_deinit(ClientKocket* kocket, KocketStatus status, pthread_t thread) {
-	stop_thread();
+	int err = KOCKET_NO_ERROR;
 	
-	int err = 0;
+	stop_thread();
 	if (pthread_join(thread, (void**) &err)) {
 		WARNING_LOG("An error occurred while joining the thread.\n");
-		return -KOCKET_IO_ERROR;
-	}
-
-	if (err < 0) {
+		err = -KOCKET_IO_ERROR;
+	} else if (err < 0) {
 		WARNING_LOG("The kocket_thread failed during execution.\n");
-		return err;
 	}
 
-	kocket_deallocate_queue(&kocket_writing_queue);
-	kocket_deallocate_queue(&kocket_reads_queue);
+	if ((err = kocket_deallocate_queue(&kocket_writing_queue)) < 0) {
+		WARNING_LOG("An error occurred while deallocating the queue.\n");
+	} else if ((err = kocket_deallocate_queue(&kocket_reads_queue)) < 0) {
+		WARNING_LOG("An error occurred while deallocating the queue.\n");
+	}
 	
 	close(kocket -> socket);
 	
@@ -109,7 +109,7 @@ int kocket_deinit(ClientKocket* kocket, KocketStatus status, pthread_t thread) {
 	kocket_status = status;
 	mutex_destroy(&kocket_status_lock);
 
-	return KOCKET_NO_ERROR;
+	return err;
 }
 
 int kocket_write(KocketStruct* kocket_struct) {

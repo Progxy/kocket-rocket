@@ -11,6 +11,7 @@
 typedef uint8_t u8;
 typedef uint32_t u32;
 typedef uint64_t u64;
+typedef u8 bool;
 
 #define _KOCKET_PRINTING_UTILS_
 #define _KOCKET_UTILS_IMPLEMENTATION_

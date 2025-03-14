@@ -34,18 +34,26 @@
 
 #define KOCKET_SAFE_FREE(ptr) do { if ((ptr) != NULL) { kocket_free(ptr); (ptr) = NULL; } } while (0) 
 #define KOCKET_ARR_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
+#define KOCKET_IS_NUM(chr) ((48 <= (chr)) && ((chr) <= 57))
 #define KOCKET_CAST_PTR(ptr, type) ((type*) (ptr))
 #define PACKED_STRUCT __attribute__((packed))
+#define KOCKET_CHAR_TO_NUM(chr) ((chr) - 48)
 
 #ifndef TRUE
 #define FALSE 0
 #define TRUE  1
 #endif //TRUE
 
-#ifdef _KOCKET_PRINTING_UTILS_
+#ifdef _U_KOCKET_H_
+	#define print printf
+#else
+	#define print printk
+#endif //_U_KOCKET_H_
+
 // -------------------------------
 // Printing Macros
 // -------------------------------
+#ifdef _KOCKET_PRINTING_UTILS_
 #define RED           "\033[31m"
 #define GREEN         "\033[32m"
 #define PURPLE        "\033[35m"
@@ -59,18 +67,22 @@
 #define TODO_COLOR    CYAN
 
 #define COLOR_STR(str, COLOR) COLOR str RESET_COLOR
-#define WARNING_LOG(format, ...) printf(COLOR_STR("WARNING:" __FILE__ ":%u: ", WARNING_COLOR) format, __LINE__, ##__VA_ARGS__)
-#define ERROR_LOG(format, error_str, ...) printf(COLOR_STR("KOCKET_ERROR:%s:" __FILE__ ":%u: ", ERROR_COLOR) format, error_str, __LINE__, ##__VA_ARGS__)
-#define TODO(msg) printf(COLOR_STR("TODO: " __FILE__ ":%u: ", TODO_COLOR) msg "\n", __LINE__), assert(FALSE)
+#define WARNING_LOG(format, ...) print(COLOR_STR("WARNING:" __FILE__ ":%u: ", WARNING_COLOR) format, __LINE__, ##__VA_ARGS__)
+#define ERROR_LOG(format, error_str, ...) print(COLOR_STR("KOCKET_ERROR:%s:" __FILE__ ":%u: ", ERROR_COLOR) format, error_str, __LINE__, ##__VA_ARGS__)
+#define TODO(msg) print(COLOR_STR("TODO: " __FILE__ ":%u: ", TODO_COLOR) msg "\n", __LINE__), assert(FALSE)
 
 #ifdef _DEBUG
-	#define DEBUG_LOG(format, ...) printf(COLOR_STR("DEBUG:" __FILE__ ":%u: ", DEBUG_COLOR) format, __LINE__, ##__VA_ARGS__)
+	#define DEBUG_LOG(format, ...) print(COLOR_STR("DEBUG:" __FILE__ ":%u: ", DEBUG_COLOR) format, __LINE__, ##__VA_ARGS__)
 #else 
     #define DEBUG_LOG(...)
 #endif //_DEBUG
 
-#include "./str_error.h"
-#define PERROR_LOG(format, ...) printf(COLOR_STR("WARNING:" __FILE__ ":%u: ", WARNING_COLOR) format ", because: " COLOR_STR("'%s'", BRIGHT_YELLOW) ".\n", __LINE__, ##__VA_ARGS__, str_error())
+#ifdef _U_KOCKET_H_
+	#include "./str_error.h"
+	#define PERROR_LOG(format, ...) print(COLOR_STR("WARNING:" __FILE__ ":%u: ", WARNING_COLOR) format ", because: " COLOR_STR("'%s'", BRIGHT_YELLOW) ".\n", __LINE__, ##__VA_ARGS__, str_error())
+#else
+	#define PERROR_LOG(format, ...) WARNING_COLOR(format, ...)
+#endif //_U_KOCKET_H_
 
 #endif //_KOCKET_PRINTING_UTILS_
 
@@ -108,9 +120,26 @@ static void mem_set_var(void* ptr, int value, size_t size, size_t val_size) {
 
 /* -------------------------------------------------------------------------------------------------------- */
 // Types and Structs
-typedef u8 bool;
-typedef enum KocketStatus { KOCKET_NO_ERROR = 0, KOCKET_IO_ERROR, KOCKET_REQ_NOT_FOUND, KOCKET_THREAD_STOP, KOCKET_TODO } KocketStatus;
-static const char* kocket_status_str[] = { "KOCKET_NO_ERROR", "KOCKET_IO_ERROR", "KOCKET_REQ_NOT_FOUND", "KOCKET_THREAD_STOP", "KOCKET_TODO" };
+typedef enum KocketStatus { 
+	KOCKET_NO_ERROR = 0, 
+	KOCKET_IO_ERROR, 
+	KOCKET_REQ_NOT_FOUND, 
+	KOCKET_THREAD_STOP, 
+	KOCKET_INVALID_PAYLOAD_SIZE,
+	KOCKET_INVALID_STR_ADDR,
+	KOCKET_INVALID_PARAMETERS,
+	KOCKET_TODO 
+} KocketStatus;
+static const char* kocket_status_str[] = { 
+	"KOCKET_NO_ERROR", 
+	"KOCKET_IO_ERROR", 
+	"KOCKET_REQ_NOT_FOUND", 
+	"KOCKET_THREAD_STOP", 
+	"KOCKET_INVALID_PAYLOAD_SIZE",
+	"KOCKET_INVALID_STR_ADDR",
+	"KOCKET_INVALID_PARAMETERS",
+	"KOCKET_TODO"
+};
 
 #ifdef _U_KOCKET_H_
 	#include <pthread.h>
@@ -328,6 +357,31 @@ int kocket_dequeue_find(KocketQueue* kocket_queue, u64 req_id, KocketStruct* koc
 	mutex_unlock(&(kocket_queue -> lock));
 
 	return KOCKET_NO_ERROR;
+}
+
+int kocket_addr_to_bytes(const char* str_addr, u32* bytes_addr) {
+    if (str_addr == NULL || bytes_addr == NULL) {
+        WARNING_LOG("Parameters must be non-NULL.\n");
+        return -KOCKET_INVALID_PARAMETERS;
+    }
+    
+    u8 temp = 0;
+    *bytes_addr = 0;
+    for (u8 i = 0, bytes_cnt = 0; i < 15 && bytes_cnt < 4; ++i, ++str_addr) {
+        if (*str_addr == '.' || *str_addr == '\0') {
+            *bytes_addr = (*bytes_addr << 4) | temp;
+            if (*str_addr == '\0') return KOCKET_NO_ERROR;
+            temp = 0;
+            bytes_cnt++;
+            continue;
+        } else if (!KOCKET_IS_NUM(*str_addr)) {
+            WARNING_LOG("Expected a number but found: '%c'\n", *str_addr);
+            return -KOCKET_INVALID_STR_ADDR;
+        }
+        temp = temp * 10 + KOCKET_CHAR_TO_NUM(*str_addr);
+    }
+    
+    return KOCKET_NO_ERROR;
 }
 
 #endif //_COMMON_KOCKET_H_

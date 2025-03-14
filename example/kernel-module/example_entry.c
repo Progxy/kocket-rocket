@@ -3,6 +3,20 @@
 #include <linux/kernel.h>
 #include <linux/semaphore.h>
 
+#define _KOCKET_CUSTOM_ALLOCATOR_
+/// kmalloc wrapper to emulate calloc behaviour
+#define kocket_calloc(nmemb, size) kcalloc(nmemb, size, GFP_KERNEL)
+
+/// kmalloc wrapper to emulate realloc behaviour
+#define kocket_realloc(ptr, new_size) krealloc(ptr, new_size, GFP_KERNEL)
+
+/// kfree wrapper to emulate free behaviour
+#define kocket_free(ptr) kfree(ptr)
+
+#define _KOCKET_PRINTING_UTILS_
+#define _KOCKET_UTILS_IMPLEMENTATION_
+#include "../../k_kocket.h"
+
 static s32 __init example_init(void) {
 	DEBUG_LOG("Module loaded.");
 	return 0;
