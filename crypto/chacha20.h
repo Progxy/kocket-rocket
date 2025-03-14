@@ -19,63 +19,78 @@
 #define _CHACHA20_H_
 
 #ifdef _U_KOCKET_H_
-#include <time.h>
-#define kocket_srand() srand(time(NULL))
-#define kocket_rand    rand
+	#include <time.h>
+	#define kocket_srand() srand(time(NULL))
+	#define kocket_rand    rand
 #else
-#include <linux/random.h>
-#define kocket_srand() 
-#define kocket_rand get_random_u32
+	#include <linux/random.h>
+	#define kocket_srand() 
+	#define kocket_rand get_random_u32
 #endif //_U_KOCKET_H_
 
+// --------
+//  Macros
+// --------
 #define QUARTER_ROUND(a, b, c, d) \
 	a += b; d ^= a; d <<= 16; 	  \
 	c += d; b ^= c; b <<= 12;     \
 	a += b; d ^= a; d <<= 8;      \
 	c += d; b ^= c; b <<= 7;
 
+/* -------------------------------------------------------------------------------------------------------- */
+// ------------------------ 
+//  Functions Declarations
+// ------------------------ 
+static inline int is_rdseed_supported(void);
+static inline int is_rdrand_supported(void);
+NO_INLINE static u64 get_rand64(void);
+NO_INLINE static u32 get_seed32(int is_rdseed_supported);
+void cha_cha20_randomize(u8 key[256], u8 nonce[96], u8 random_data[64]);
+u8* cha_cha20(u8 random_data[64]);
+
+/* -------------------------------------------------------------------------------------------------------- */
 static inline int is_rdseed_supported(void) {
 	int is_supported = 0; 
 	__asm__ volatile (                          
-		 "movl $7, %%eax;"                       
-		 "cpuid;"                                
-		 "movl %%ebx, %0;"                       
-		 : "=r"(is_supported)                    
-		 :                                       
-		 : "%eax", "%ebx");                      
+		"movl $7, %%eax;"                       
+		"cpuid;"                                
+		"movl %%ebx, %0;"                       
+		: "=r"(is_supported)                    
+		:                                       
+		: "%eax", "%ebx");                      
 	return (is_supported >> 18) & 0x01; 
 }
 
 static inline int is_rdrand_supported(void) {
     int is_supported = 0; 
 	__asm__ volatile (                         
-         "movl $1, %%eax;"                      
-         "cpuid;"                              
-         "movl %%ecx, %0;"                      
-         : "=r"(is_supported)                   
-         :                                      
-         : "%eax", "%ecx");                     
+        "movl $1, %%eax;"                      
+        "cpuid;"                              
+        "movl %%ecx, %0;"                      
+        : "=r"(is_supported)                   
+        :                                      
+        : "%eax", "%ecx");                     
     return (is_supported >> 30) & 0x01; 
 }
 
-static u64 get_rand64(void) {
+NO_INLINE static u64 get_rand64(void) {
     u64 rand = 0;
     __asm__ volatile(
-        "gen_rand:"
-        "rdrand %0;"
-        "jnc gen_rand;"
+        "kocket_get_rand:"
+		"rdrand %0;"
+        "jnc kocket_get_rand;"
         : "=r"(rand)
         :          );
     return rand;
 }
 
-static u32 get_seed32(int is_rdseed_supported) {
+NO_INLINE static u32 get_seed32(int is_rdseed_supported) {
     if (!is_rdseed_supported) return ((u32) get_rand64());
 	u32 seed = 0;
     __asm__ volatile(
-        "gen_seed:"
+        "kocket_get_seed:"
         "rdseed %0;"
-        "jnc gen_seed;"
+        "jnc kocket_get_seed;"
         : "=r"(seed)
         :          );
     return seed;
@@ -87,7 +102,7 @@ void cha_cha20_randomize(u8 key[256], u8 nonce[96], u8 random_data[64]) {
 	
 	// Init the initial state vector
 	chacha_initial_vector[0] = 0x61707865;
-   	chacha_initial_vector[1] = 0x3320646e;
+	chacha_initial_vector[1] = 0x3320646e;
     chacha_initial_vector[2] = 0x79622d32; 
 	chacha_initial_vector[3] = 0x6b206574;
 	for (u8 i = 0; i < 8; ++i) chacha_initial_vector[i + 4] = ((u32*) key)[i];	
@@ -119,7 +134,7 @@ void cha_cha20_randomize(u8 key[256], u8 nonce[96], u8 random_data[64]) {
 
 u8* cha_cha20(u8 random_data[64]) {
 	u64 key[64] = {0};
-   	u32 nonce[24] = {0};
+	u32 nonce[24] = {0};
 	mem_set(random_data, 0, 64 * sizeof(u8));
 
 	int is_supported_rdseed = is_rdseed_supported();

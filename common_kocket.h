@@ -36,6 +36,7 @@
 #define KOCKET_ARR_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 #define KOCKET_IS_NUM(chr) ((48 <= (chr)) && ((chr) <= 57))
 #define KOCKET_CAST_PTR(ptr, type) ((type*) (ptr))
+#define NO_INLINE __attribute__((__noinline__))
 #define PACKED_STRUCT __attribute__((packed))
 #define KOCKET_CHAR_TO_NUM(chr) ((chr) - 48)
 
@@ -180,7 +181,7 @@ typedef struct ServerKocket {
 	KocketType* kocket_types;
 	u32 kocket_types_cnt;
 	struct socket** clients;
-	struct pollfd* polls;
+	u32* poll_events;
 	u32 clients_cnt;
 	bool use_secure_connection;
 } ServerKocket;
@@ -219,6 +220,18 @@ static KocketQueue kocket_reads_queue = {0};
 
 static KocketStatus kocket_status = KOCKET_NO_ERROR;
 static mutex_t kocket_status_lock = {0};
+
+/* -------------------------------------------------------------------------------------------------------- */
+// ------------------------
+//  Functions Declarations
+// ------------------------
+int kocket_alloc_queue(KocketQueue* kocket_queue);
+int kocket_deallocate_queue(KocketQueue* kocket_queue);
+int kocket_enqueue(KocketQueue* kocket_queue, KocketStruct kocket_struct, u32 kocket_client_id);
+int kocket_dequeue(KocketQueue* kocket_queue, KocketStruct* kocket_struct, u32* kocket_client_id);
+int is_kocket_queue_empty(KocketQueue* kocket_queue) ;
+int kocket_dequeue_find(KocketQueue* kocket_queue, u64 req_id, KocketStruct* kocket_struct);
+int kocket_addr_to_bytes(const char* str_addr, u32* bytes_addr);
 
 /* -------------------------------------------------------------------------------------------------------- */
 int kocket_alloc_queue(KocketQueue* kocket_queue) {
