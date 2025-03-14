@@ -26,7 +26,7 @@
 // ------------------------
 int kocket_init(ClientKocket* kocket, pthread_t* pthread);
 int kocket_deinit(ClientKocket* kocket, KocketStatus status, pthread_t thread);
-int kocket_write(u32 kocket_client_id, KocketStruct* kocket_struct);
+int kocket_write(KocketStruct* kocket_struct);
 int kocket_read(u64 req_id, KocketStruct* kocket_struct, bool wait_response);
 static int kocket_send(ClientKocket kocket, KocketStruct kocket_struct);
 static int kocket_recv(ClientKocket kocket);
@@ -65,11 +65,20 @@ int kocket_init(ClientKocket* kocket, pthread_t* pthread) {
 	
 	// TODO: Implement the algorithms needed for ensuring connection security
 	if (kocket -> use_secure_connection) {
+		close(kocket -> socket);
+		mutex_destroy(&kocket_status_destroy);
 		WARNING_LOG("The secure connection stack has not been implemented yet.\n");
 		return -KOCKET_TODO;
 	}
 	
+	kocket_alloc_queue(&kocket_writing_queue);
+	kocket_alloc_queue(&kocket_reads_queue);
+
 	if (pthread_create(pthread, NULL, kocket_dispatcher, (void*) kocket) != 0) {
+		close(kocket -> socket);
+		mutex_destroy(&kocket_status_destroy);
+		kocket_deallocate_queue(&kocket_writing_queue);
+		kocket_deallocate_queue(&kocket_reads_queue);
 		WARNING_LOG("Failed to create the pthread.\n");
 		return -KOCKET_IO_ERROR;
 	}
@@ -103,12 +112,12 @@ int kocket_deinit(ClientKocket* kocket, KocketStatus status, pthread_t thread) {
 	return KOCKET_NO_ERROR;
 }
 
-int kocket_write(u32 kocket_client_id, KocketStruct* kocket_struct) {
+int kocket_write(KocketStruct* kocket_struct) {
 	u8 initialization_vector[64] = {0};
 	kocket_struct -> req_id = *KOCKET_CAST_PTR(cha_cha20(initialization_vector), u64);
 	
 	int err = 0;
-	if ((err = kocket_enqueue(&kocket_writing_queue, *kocket_struct, kocket_client_id)) < 0) {
+	if ((err = kocket_enqueue(&kocket_writing_queue, *kocket_struct, 0)) < 0) {
 		WARNING_LOG("Failed to enqueue the given kocket_struct.\n");
 		return err;
 	}

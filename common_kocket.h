@@ -32,7 +32,8 @@
 	#include <stophere>
 #endif // CHECK_ALLOCATIONS
 
-#define KOCKET_SAFE_FREE(ptr) do { if (ptr != NULL) { kocket_free(ptr); ptr = NULL; } } while (0) 
+#define KOCKET_SAFE_FREE(ptr) do { if ((ptr) != NULL) { kocket_free(ptr); (ptr) = NULL; } } while (0) 
+#define KOCKET_ARR_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 #define KOCKET_CAST_PTR(ptr, type) ((type*) (ptr))
 #define PACKED_STRUCT __attribute__((packed))
 
@@ -58,7 +59,8 @@
 #define TODO_COLOR    CYAN
 
 #define COLOR_STR(str, COLOR) COLOR str RESET_COLOR
-#define WARNING_LOG(format, ...) printf(COLOR_STR("WARNING:" __FILE__ ":%u: ", BRIGHT_YELLOW) format, __LINE__, ##__VA_ARGS__)
+#define WARNING_LOG(format, ...) printf(COLOR_STR("WARNING:" __FILE__ ":%u: ", WARNING_COLOR) format, __LINE__, ##__VA_ARGS__)
+#define ERROR_LOG(format, error_str, ...) printf(COLOR_STR("KOCKET_ERROR:%s:" __FILE__ ":%u: ", ERROR_COLOR) format, error_str, __LINE__, ##__VA_ARGS__)
 #define TODO(msg) printf(COLOR_STR("TODO: " __FILE__ ":%u: ", TODO_COLOR) msg "\n", __LINE__), assert(FALSE)
 
 #ifdef _DEBUG
@@ -68,7 +70,7 @@
 #endif //_DEBUG
 
 #include "./str_error.h"
-#define PERROR_LOG(format, ...) printf(COLOR_STR("WARNING:" __FILE__ ":%u: ", BRIGHT_YELLOW) format ", because: " COLOR_STR("'%s'", BRIGHT_YELLOW) ".\n", __LINE__, ##__VA_ARGS__, str_error())
+#define PERROR_LOG(format, ...) printf(COLOR_STR("WARNING:" __FILE__ ":%u: ", WARNING_COLOR) format ", because: " COLOR_STR("'%s'", BRIGHT_YELLOW) ".\n", __LINE__, ##__VA_ARGS__, str_error())
 
 #endif //_KOCKET_PRINTING_UTILS_
 
@@ -122,6 +124,7 @@ static const char* kocket_status_str[] = { "KOCKET_NO_ERROR", "KOCKET_IO_ERROR",
 	#define mutex_destroy(mutex_lock)
 #endif //_U_KOCKET_H_
 
+// TODO: Should probably change KocketStruct with KocketPacket or something similar
 typedef struct PACKED_STRUCT KocketStruct {
 	u32 type_id;
 	u64 req_id;
@@ -182,7 +185,7 @@ static KocketStatus kocket_status = KOCKET_NO_ERROR;
 static mutex_t kocket_status_lock = {0};
 
 /* -------------------------------------------------------------------------------------------------------- */
-int kocket_init_queue(KocketQueue* kocket_queue) {
+int kocket_alloc_queue(KocketQueue* kocket_queue) {
 	if (kocket_queue == NULL) {
 		WARNING_LOG("Invalid kocket_queue, the given kocket_queue is NULL.\n");
 		return -KOCKET_IO_ERROR;
