@@ -1,7 +1,20 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
-#include <linux/semaphore.h>
+#include <linux/poll.h>    // poll_fd and polling functions
+#include <linux/mutex.h>   // Mutex operations
+#include <linux/kthread.h>
+
+#include <linux/netdevice.h>
+#include <linux/ip.h>
+#include <linux/in.h>
+
+#include <linux/unistd.h>
+
+#include <net/sock.h>
+#include <net/tcp.h>
+#include <net/inet_connection_sock.h>
+#include <net/request_sock.h>
 
 #define _KOCKET_CUSTOM_ALLOCATOR_
 /// kmalloc wrapper to emulate calloc behaviour

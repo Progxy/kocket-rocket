@@ -77,11 +77,11 @@
     #define DEBUG_LOG(...)
 #endif //_DEBUG
 
+#include "./str_error.h"
 #ifdef _U_KOCKET_H_
-	#include "./str_error.h"
-	#define PERROR_LOG(format, ...) print(COLOR_STR("WARNING:" __FILE__ ":%u: ", WARNING_COLOR) format ", because: " COLOR_STR("'%s'", BRIGHT_YELLOW) ".\n", __LINE__, ##__VA_ARGS__, str_error())
+#define PERROR_LOG(format, ...) print(COLOR_STR("WARNING:" __FILE__ ":%u: ", WARNING_COLOR) format ", because: " COLOR_STR("'%s'", BRIGHT_YELLOW) ".\n", __LINE__, ##__VA_ARGS__, str_error())
 #else
-	#define PERROR_LOG(format, ...) WARNING_COLOR(format, ...)
+#define PERROR_LOG(format, err, ...) print(COLOR_STR("WARNING:" __FILE__ ":%u: ", WARNING_COLOR) format ", because: " COLOR_STR("'%s'", BRIGHT_YELLOW) ".\n", __LINE__, ##__VA_ARGS__, str_error(err))
 #endif //_U_KOCKET_H_
 
 #endif //_KOCKET_PRINTING_UTILS_
@@ -128,6 +128,7 @@ typedef enum KocketStatus {
 	KOCKET_INVALID_PAYLOAD_SIZE,
 	KOCKET_INVALID_STR_ADDR,
 	KOCKET_INVALID_PARAMETERS,
+	INVALID_KOCKET_CLIENT_ID,
 	KOCKET_TODO 
 } KocketStatus;
 static const char* kocket_status_str[] = { 
@@ -138,6 +139,7 @@ static const char* kocket_status_str[] = {
 	"KOCKET_INVALID_PAYLOAD_SIZE",
 	"KOCKET_INVALID_STR_ADDR",
 	"KOCKET_INVALID_PARAMETERS",
+	"INVALID_KOCKET_CLIENT_ID",
 	"KOCKET_TODO"
 };
 
@@ -168,19 +170,22 @@ typedef struct KocketType {
 	KocketHandler kocket_handler;
 } KocketType;
 
+#ifdef _K_KOCKET_H_
 typedef struct ServerKocket {
-	int socket;
+	struct socket* socket;
 	int backlog;
 	unsigned short int port;
 	unsigned int address;
 	struct sockaddr_in sock_addr;
 	KocketType* kocket_types;
 	u32 kocket_types_cnt;
-	int* clients;
+	struct socket** clients;
 	struct pollfd* polls;
 	u32 clients_cnt;
 	bool use_secure_connection;
 } ServerKocket;
+
+#else
 
 typedef struct ClientKocket {
 	int socket;
@@ -192,6 +197,8 @@ typedef struct ClientKocket {
 	struct pollfd poll_fd;
 	bool use_secure_connection;
 } ClientKocket;
+
+#endif //_K_KOCKET_H_
 
 typedef struct KocketQueue {
 	KocketStruct* kocket_structs;

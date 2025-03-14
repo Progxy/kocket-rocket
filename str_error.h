@@ -22,8 +22,14 @@
 #define ERRNO_STRS_SIZE (int)(sizeof(errno_strs) / sizeof(errno_strs[0]))
 
 // Macro to safely fetch error strings
-#include <errno.h>
-#define str_error() ((errno >= 0 && errno < ERRNO_STRS_SIZE) ? errno_strs[errno] : "Unknown error")
+#ifdef _U_KOCKET_H_
+	#include <errno.h>
+	#define str_error() ((errno >= 0 && errno < ERRNO_STRS_SIZE) ? errno_strs[errno] : "Unknown error")
+#else
+	#include <linux/errno.h>
+	#define str_error(errno) ((-errno >= 0 && -errno < ERRNO_STRS_SIZE) ? errno_strs[-errno] : "Unknown error")
+#endif //_U_KOCKET_H_
+
 
 static const char* errno_strs[] = {
     [0]               = "Success",

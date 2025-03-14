@@ -18,6 +18,16 @@
 #ifndef _CHACHA20_H_
 #define _CHACHA20_H_
 
+#ifdef _U_KOCKET_H_
+#include <time.h>
+#define kocket_srand() srand(time(NULL))
+#define kocket_rand    rand
+#else
+#include <linux/random.h>
+#define kocket_srand() 
+#define kocket_rand get_random_u32
+#endif //_U_KOCKET_H_
+
 #define QUARTER_ROUND(a, b, c, d) \
 	a += b; d ^= a; d <<= 16; 	  \
 	c += d; b ^= c; b <<= 12;     \
@@ -117,13 +127,15 @@ u8* cha_cha20(u8 random_data[64]) {
     if (!is_supported_rdrand) {
         WARNING_LOG("CHACHA20: RDRAND is UNSUPPORTED.\n");
         if (!is_supported_rdseed) WARNING_LOG("CHACHA20: RDSEED is UNSUPPORTED.\n");
-        srand(time(NULL));
-		u32 rand_value = rand();
+        kocket_srand();
+		u32 rand_value = kocket_rand();
 		mem_cpy(random_data, &rand_value, sizeof(u32));
-		rand_value = rand();
+		rand_value = kocket_rand();
 		mem_cpy(random_data + sizeof(u32), &rand_value, sizeof(u32));
 		return random_data;
-    } else if (!is_supported_rdseed) DEBUG_LOG("CHACHA20: RDSEED is UNSUPPORTED.\n");
+    } else if (!is_supported_rdseed) {
+		DEBUG_LOG("CHACHA20: RDSEED is UNSUPPORTED.\n");
+	}
 
 	for (u8 i = 0; i < 64; ++i) {
 		key[i] = get_rand64();
