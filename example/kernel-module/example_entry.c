@@ -34,13 +34,13 @@ typedef enum ClientKocketTypes { KOCKET_LOG_TYPE = 0, KOCKET_INFO_REQUEST } Clie
 // ------------------
 //  Static Variables
 // ------------------
-ServerKocket kocket = {0};
 struct task_struct kocket_thread = {0};
 
 /* -------------------------------------------------------------------------------------------------------- */
 // ------------------------
 //  Functions Declarations
 // ------------------------
+// TODO: Remove the \n from all the places where it could be printed to kernel ring buffer
 int info_request_handler(u32 kocket_client_id, KocketStruct kocket_struct);
 
 /* -------------------------------------------------------------------------------------------------------- */
@@ -52,7 +52,7 @@ int info_request_handler(u32 kocket_client_id, KocketStruct kocket_struct) {
 	
 	if (info_req_res.payload == NULL) {
 		int ret = 0;
-		if ((ret = kocket_deinit(&kocket, -KOCKET_IO_ERROR, &kocket_thread)) < 0) {
+		if ((ret = kocket_deinit(-KOCKET_IO_ERROR, &kocket_thread)) < 0) {
 			ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-ret]);
 			return ret;
 		}
@@ -69,7 +69,7 @@ int info_request_handler(u32 kocket_client_id, KocketStruct kocket_struct) {
 		if ((err = kocket_write(kocket_client_id, &info_req_res)) < 0) {
 			KOCKET_SAFE_FREE(info_req_res.payload);
 			int ret = 0;
-			if ((ret = kocket_deinit(&kocket, -KOCKET_IO_ERROR, &kocket_thread)) < 0) {
+			if ((ret = kocket_deinit(-KOCKET_IO_ERROR, &kocket_thread)) < 0) {
 				ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-ret]);
 				return ret;
 			}
@@ -87,7 +87,7 @@ int info_request_handler(u32 kocket_client_id, KocketStruct kocket_struct) {
 		if ((err = kocket_write(kocket_client_id, &info_req_res)) < 0) {
 			KOCKET_SAFE_FREE(info_req_res.payload);
 			int ret = 0;
-			if ((ret = kocket_deinit(&kocket, -KOCKET_IO_ERROR, &kocket_thread)) < 0) {
+			if ((ret = kocket_deinit(-KOCKET_IO_ERROR, &kocket_thread)) < 0) {
 				ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-ret]);
 				return ret;
 			}
@@ -106,7 +106,7 @@ int info_request_handler(u32 kocket_client_id, KocketStruct kocket_struct) {
 	if ((err = kocket_write(kocket_client_id, &info_req_res)) < 0) {
 		KOCKET_SAFE_FREE(info_req_res.payload);
 		int ret = 0;
-		if ((ret = kocket_deinit(&kocket, -KOCKET_IO_ERROR, &kocket_thread)) < 0) {
+		if ((ret = kocket_deinit(-KOCKET_IO_ERROR, &kocket_thread)) < 0) {
 			ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-ret]);
 			return ret;
 		}
@@ -135,17 +135,14 @@ static s32 __init example_init(void) {
 	KocketType kocket_types[] = { kocket_log_type, kocket_info_request_type };
 	
 	int err = 0;
-	if ((err = kocket_addr_to_bytes(HOST_ADDRESS, &kocket.address)) < 0) {
-		WARNING_LOG("An error occurred while converting the address from string to bytes.\n");
-		return err;
-	}
-	
+	ServerKocket kocket = {0};
 	kocket.port = HOST_PORT;
+	kocket.address = INADDR_ANY;
 	kocket.kocket_types = kocket_types;
 	kocket.kocket_types_cnt = KOCKET_ARR_SIZE(kocket_types);
 	kocket.use_secure_connection = FALSE;
 	
-	if ((err = kocket_init(&kocket, &kocket_thread)) < 0) {
+	if ((err = kocket_init(kocket, &kocket_thread)) < 0) {
 		ERROR_LOG("An error occurred while initializing the kocket.\n", kocket_status_str[-err]);
 		return err;
 	}
@@ -159,7 +156,7 @@ static s32 __init example_init(void) {
 	
 	if ((err = kocket_write(0, &log_msg)) < 0) {
 		int ret = 0;
-		if ((ret = kocket_deinit(&kocket, -KOCKET_IO_ERROR, &kocket_thread)) < 0) {
+		if ((ret = kocket_deinit(-KOCKET_IO_ERROR, &kocket_thread)) < 0) {
 			ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-ret]);
 			return ret;
 		}
@@ -175,7 +172,7 @@ static s32 __init example_init(void) {
 	
 	if ((err = kocket_write(0, &log_msg)) < 0) {
 		int ret = 0;
-		if ((ret = kocket_deinit(&kocket, -KOCKET_IO_ERROR, &kocket_thread)) < 0) {
+		if ((ret = kocket_deinit(-KOCKET_IO_ERROR, &kocket_thread)) < 0) {
 			ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-ret]);
 			return ret;
 		}
@@ -189,7 +186,7 @@ static s32 __init example_init(void) {
 
 static void __exit example_exit(void) {
 	int err = 0;
-	if ((err = kocket_deinit(&kocket, KOCKET_NO_ERROR, &kocket_thread)) < 0) {
+	if ((err = kocket_deinit(KOCKET_NO_ERROR, &kocket_thread)) < 0) {
 		ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-err]);
 		return;
 	}
