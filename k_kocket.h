@@ -138,11 +138,11 @@ static void kocket_deinit_thread(ServerKocket* kocket, KocketStatus status) {
 	kocket_status = status;
 	mutex_unlock(&kocket_status_lock);
 	
-	if (kocket_deallocate_queue(&kocket_writing_queue)) {
+	if (kocket_deallocate_queue(&kocket_writing_queue, FALSE)) {
 		WARNING_LOG("Failed to deallocate the queue.\n");
 	}
 
-	if (kocket_deallocate_queue(&kocket_reads_queue)) {
+	if (kocket_deallocate_queue(&kocket_reads_queue, TRUE)) {
 		WARNING_LOG("Failed to deallocate the queue.\n");
 	}
 	

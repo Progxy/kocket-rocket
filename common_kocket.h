@@ -235,7 +235,7 @@ static mutex_t kocket_status_lock = {0};
 //  Functions Declarations
 // ------------------------
 int kocket_alloc_queue(KocketQueue* kocket_queue);
-int kocket_deallocate_queue(KocketQueue* kocket_queue);
+int kocket_deallocate_queue(KocketQueue* kocket_queue, bool clean_payloads);
 int kocket_enqueue(KocketQueue* kocket_queue, KocketStruct kocket_struct, u32 kocket_client_id);
 int kocket_dequeue(KocketQueue* kocket_queue, KocketStruct* kocket_struct, u32* kocket_client_id);
 int is_kocket_queue_empty(KocketQueue* kocket_queue) ;
@@ -259,7 +259,7 @@ int kocket_alloc_queue(KocketQueue* kocket_queue) {
 	return KOCKET_NO_ERROR;
 }
 
-int kocket_deallocate_queue(KocketQueue* kocket_queue) {
+int kocket_deallocate_queue(KocketQueue* kocket_queue, bool clean_payloads) {
 	if (kocket_queue == NULL) {
 		WARNING_LOG("Invalid kocket_queue, the given kocket_queue is NULL.\n");
 		return -KOCKET_IO_ERROR;
@@ -267,8 +267,7 @@ int kocket_deallocate_queue(KocketQueue* kocket_queue) {
 
 	mutex_lock(&(kocket_queue -> lock));
 	
-	WARNING_LOG("size: %u, kocket_structs: %p, kocket_clients_ids: %p\n", kocket_queue -> size, kocket_queue -> kocket_structs, kocket_queue -> kocket_clients_ids);
-	for (u32 i = 0; i < kocket_queue -> size; ++i) KOCKET_SAFE_FREE((kocket_queue -> kocket_structs)[i].payload);
+	for (u32 i = 0; i < kocket_queue -> size && clean_payloads; ++i) KOCKET_SAFE_FREE((kocket_queue -> kocket_structs)[i].payload);
 	KOCKET_SAFE_FREE(kocket_queue -> kocket_structs);
 	KOCKET_SAFE_FREE(kocket_queue -> kocket_clients_ids);
 	kocket_queue -> size = 0;
