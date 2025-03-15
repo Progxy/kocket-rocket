@@ -20,13 +20,182 @@
 #define _KOCKET_UTILS_IMPLEMENTATION_
 #include "../../k_kocket.h"
 
+/* -------------------------------------------------------------------------------------------------------- */
+// -----------------
+//  Macros and Enums
+// -----------------
+#define HOST_PORT 6969
+#define HOST_ADDRESS "127.0.0.1"
+
+typedef enum InfoRequestTypes { LOG_BUFFER_SIZE, IS_LOG_BUFFER_EMPTY } InfoRequestTypes;
+typedef enum ClientKocketTypes { KOCKET_LOG_TYPE = 0, KOCKET_INFO_REQUEST } ClientKocketTypes;
+
+/* -------------------------------------------------------------------------------------------------------- */
+// ------------------
+//  Static Variables
+// ------------------
+ServerKocket kocket = {0};
+struct task_struct kocket_thread = {0};
+
+/* -------------------------------------------------------------------------------------------------------- */
+// ------------------------
+//  Functions Declarations
+// ------------------------
+int info_request_handler(u32 kocket_client_id, KocketStruct kocket_struct);
+
+/* -------------------------------------------------------------------------------------------------------- */
+int info_request_handler(u32 kocket_client_id, KocketStruct kocket_struct) {
+	KocketStruct info_req_res = {0};
+	info_req_res.type_id = KOCKET_INFO_REQUEST;
+	info_req_res.payload_size = sizeof(InfoRequestTypes);
+	info_req_res.payload = (u8*) kocket_calloc(sizeof(InfoRequestTypes), sizeof(u8));
+	
+	if (info_req_res.payload == NULL) {
+		int ret = 0;
+		if ((ret = kocket_deinit(&kocket, -KOCKET_IO_ERROR, &kocket_thread)) < 0) {
+			ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-ret]);
+			return ret;
+		}
+		WARNING_LOG("Failed to allocate the payload.\n");
+		return -1;
+	}
+	
+	int err = 0;
+	InfoRequestTypes info_req = *KOCKET_CAST_PTR(kocket_struct.payload, InfoRequestTypes);
+	if (info_req == LOG_BUFFER_SIZE) {
+		int val = 512;
+		mem_cpy(info_req_res.payload, &val, sizeof(InfoRequestTypes));
+		
+		if ((err = kocket_write(kocket_client_id, &info_req_res)) < 0) {
+			KOCKET_SAFE_FREE(info_req_res.payload);
+			int ret = 0;
+			if ((ret = kocket_deinit(&kocket, -KOCKET_IO_ERROR, &kocket_thread)) < 0) {
+				ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-ret]);
+				return ret;
+			}
+			ERROR_LOG("An error occurred while writing to the kocket.\n", kocket_status_str[-err]);
+			return err;
+		}
+
+		KOCKET_SAFE_FREE(info_req_res.payload);
+		
+		return KOCKET_NO_ERROR;
+	} else if (info_req == IS_LOG_BUFFER_EMPTY) {
+		int val = 0;
+		mem_cpy(info_req_res.payload, &val, sizeof(InfoRequestTypes));
+		
+		if ((err = kocket_write(kocket_client_id, &info_req_res)) < 0) {
+			KOCKET_SAFE_FREE(info_req_res.payload);
+			int ret = 0;
+			if ((ret = kocket_deinit(&kocket, -KOCKET_IO_ERROR, &kocket_thread)) < 0) {
+				ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-ret]);
+				return ret;
+			}
+			ERROR_LOG("An error occurred while writing to the kocket.\n", kocket_status_str[-err]);
+			return err;
+		}
+
+		KOCKET_SAFE_FREE(info_req_res.payload);
+		
+		return KOCKET_NO_ERROR;
+	}
+	
+	int val = -1;
+	mem_cpy(info_req_res.payload, &val, sizeof(InfoRequestTypes));
+	
+	if ((err = kocket_write(kocket_client_id, &info_req_res)) < 0) {
+		KOCKET_SAFE_FREE(info_req_res.payload);
+		int ret = 0;
+		if ((ret = kocket_deinit(&kocket, -KOCKET_IO_ERROR, &kocket_thread)) < 0) {
+			ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-ret]);
+			return ret;
+		}
+		ERROR_LOG("An error occurred while writing to the kocket.\n", kocket_status_str[-err]);
+		return err;
+	}
+
+	KOCKET_SAFE_FREE(info_req_res.payload);
+
+	return KOCKET_NO_ERROR;
+}
+
 static s32 __init example_init(void) {
+	KocketType kocket_log_type = {
+		.type_name = "LOG",
+	   	.has_handler = FALSE,
+		.kocket_handler = NULL
+   	};
+
+	KocketType kocket_info_request_type = {
+		.type_name = "INFO_REQUEST",
+		.has_handler = TRUE,
+		.kocket_handler = info_request_handler
+	};
+	
+	KocketType kocket_types[] = { kocket_log_type, kocket_info_request_type };
+	
+	int err = 0;
+	if ((err = kocket_addr_to_bytes(HOST_ADDRESS, &kocket.address)) < 0) {
+		WARNING_LOG("An error occurred while converting the address from string to bytes.\n");
+		return err;
+	}
+	
+	kocket.port = HOST_PORT;
+	kocket.kocket_types = kocket_types;
+	kocket.kocket_types_cnt = KOCKET_ARR_SIZE(kocket_types);
+	kocket.use_secure_connection = FALSE;
+	
+	if ((err = kocket_init(&kocket, &kocket_thread)) < 0) {
+		ERROR_LOG("An error occurred while initializing the kocket.\n", kocket_status_str[-err]);
+		return err;
+	}
+
+	// Randomly exchange some data with the client
+	KocketStruct log_msg = {0};
+	log_msg.type_id = KOCKET_LOG_TYPE;
+	const char log_payload[] = "Here is some data.\n";
+	log_msg.payload_size = KOCKET_ARR_SIZE(log_payload);
+	log_msg.payload = (u8*) log_payload;
+	
+	if ((err = kocket_write(0, &log_msg)) < 0) {
+		int ret = 0;
+		if ((ret = kocket_deinit(&kocket, -KOCKET_IO_ERROR, &kocket_thread)) < 0) {
+			ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-ret]);
+			return ret;
+		}
+		ERROR_LOG("An error occurred while writing to the kocket.\n", kocket_status_str[-err]);
+		return err;
+	}
+
+	KocketStruct log_sec_msg = {0};
+	log_sec_msg.type_id = KOCKET_LOG_TYPE;
+	const char log_sec_payload[] = "Here is some data again.\n";
+	log_sec_msg.payload_size = KOCKET_ARR_SIZE(log_sec_payload);
+	log_sec_msg.payload = (u8*) log_sec_payload;
+	
+	if ((err = kocket_write(0, &log_msg)) < 0) {
+		int ret = 0;
+		if ((ret = kocket_deinit(&kocket, -KOCKET_IO_ERROR, &kocket_thread)) < 0) {
+			ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-ret]);
+			return ret;
+		}
+		ERROR_LOG("An error occurred while writing to the kocket.\n", kocket_status_str[-err]);
+		return err;
+	}
+	
 	DEBUG_LOG("Module loaded.");
 	return 0;
 }
 
 static void __exit example_exit(void) {
+	int err = 0;
+	if ((err = kocket_deinit(&kocket, KOCKET_NO_ERROR, &kocket_thread)) < 0) {
+		ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-err]);
+		return;
+	}
+
 	DEBUG_LOG("Module unloaded.");
+	
 	return;
 }
 

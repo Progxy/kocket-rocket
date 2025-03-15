@@ -24,7 +24,7 @@
 // ------------------------
 //  Functions Declarations
 // ------------------------
-int kocket_init(ServerKocket* kocket, struct task_struct *kthread);
+int kocket_init(ServerKocket* kocket, struct task_struct* kthread);
 int kocket_deinit(ServerKocket* kocket, KocketStatus status, struct task_struct* kthread);
 int kocket_write(u32 kocket_client_id, KocketStruct* kocket_struct);
 int kocket_read(u64 req_id, KocketStruct* kocket_struct, bool wait_response);
@@ -34,7 +34,7 @@ static int kocket_poll_read_accept(ServerKocket* kocket);
 int kocket_dispatcher(void* kocket_arg);
 
 /* -------------------------------------------------------------------------------------------------------- */
-int kocket_init(ServerKocket* kocket, struct task_struct *kthread) {
+int kocket_init(ServerKocket* kocket, struct task_struct* kthread) {
 	int err = sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP, &(kocket -> socket));
 	if (kocket -> socket == NULL) {
 		PERROR_LOG("An error occurred while creating the socket", err);
@@ -207,7 +207,7 @@ static int kocket_recv(ServerKocket kocket, u32 kocket_client_id) {
 	
 	int ret = 0;
 	if (kocket_struct.type_id < kocket.kocket_types_cnt && (kocket.kocket_types)[kocket_struct.type_id].has_handler) {
-		if ((ret = (*((kocket.kocket_types)[kocket_struct.type_id].kocket_handler)) (kocket_struct)) < 0) {
+		if ((ret = (*((kocket.kocket_types)[kocket_struct.type_id].kocket_handler)) (kocket_client_id, kocket_struct)) < 0) {
 			WARNING_LOG("An error occurred while executing the handler for the type: '%s'\n", (kocket.kocket_types)[kocket_struct.type_id].type_name);
 			return ret;
 		}
@@ -228,18 +228,13 @@ static int poll(u32* poll_events, struct socket** sks, u32 sks_cnt) {
 	// 		poll_events[i] = !reqsk_queue_empty(&inet_csk(sks[i]) -> icsk_accept_queue) ? (POLLIN | POLLRDNORM) : 0;
 	// 		continue;
 	// 	}
-
 	// }
-	return KOCKET_NO_ERROR;
+	// TODO: Should probably fix this function
+	return 1;
 }
 
 static int kocket_poll_read_accept(ServerKocket* kocket) {
-	int ret = poll(kocket -> poll_events, kocket -> clients, kocket -> clients_cnt + 1); //, KOCKET_TIMEOUT_MS);
-	if (ret < 0) {
-		PERROR_LOG("Failed to perform the read/accept poll", ret);
-		return -KOCKET_IO_ERROR;
-	} else if (ret == 0) return KOCKET_NO_ERROR;
-
+	int ret = 0;
 	if ((kocket -> poll_events)[0] & POLLIN) {
 		struct socket* new_client = {0};
 		if ((ret = kernel_accept(kocket -> socket, &new_client, SOCK_NONBLOCK)) < 0) {
@@ -288,39 +283,62 @@ static int kocket_poll_read_accept(ServerKocket* kocket) {
 	return KOCKET_NO_ERROR;
 }
 
+static int kocket_poll_write(ServerKocket* kocket) {
+	int err = 0;
+	if ((err = is_kocket_queue_empty(&kocket_writing_queue)) < 0) {
+		kocket_deinit(kocket, err, NULL);
+		WARNING_LOG("An error occurred while checking if the kocket_writing_queue was empty.\n");
+		return err;
+	}
+	
+	u32 kocket_queue_size = err;
+	for (u32 i = 0; i < kocket_queue_size; ++i) {
+		u32 kocket_client_id = 0;
+		if ((err = kocket_queue_get_n_client_id(&kocket_writing_queue, i, &kocket_client_id)) < 0) {
+			kocket_deinit(kocket, err, NULL);
+			WARNING_LOG("Failed to get the %u client_id from the kocket_writing_queue.\n", i + 1);
+			return err;
+		}
+
+		if (!((kocket -> poll_events)[i] & POLLOUT)) continue;
+		
+		KocketStruct kocket_struct = {0};
+		if ((err = kocket_dequeue(&kocket_writing_queue, &kocket_struct, &kocket_client_id)) < 0) {
+			kocket_deinit(kocket, err, NULL);
+			WARNING_LOG("Failed to dequeue from the kocket_writing_queue.\n");
+			return err;
+		}
+		
+		if ((err = kocket_send(*kocket, kocket_client_id, kocket_struct)) < 0) {
+			kocket_deinit(kocket, err, NULL);
+			WARNING_LOG("Failed to send the queued kocket_struct.\n");
+			return err;
+		}
+	}
+
+	return KOCKET_NO_ERROR;
+}
+
 // This will be the function executed by the kocket-thread.
 int kocket_dispatcher(void* kocket_arg) {
-	int ret = 0;
 	ServerKocket* kocket = (ServerKocket*) kocket_arg;
 	while (!kthread_should_stop()) {
+		int ret = poll(kocket -> poll_events, kocket -> clients, kocket -> clients_cnt + 1); //, KOCKET_TIMEOUT_MS);
+		if (ret < 0) {
+			PERROR_LOG("Failed to perform the polling", ret);
+			return -KOCKET_IO_ERROR;
+		} else if (ret == 0) continue;
+
 		if ((ret = kocket_poll_read_accept(kocket)) < 0) {
 			kocket_deinit(kocket, ret, NULL);
 			WARNING_LOG("An error occurred while polling read/accept.\n");
 			return ret;
 		}
 
-		// TODO: As the send operations are non-blocking, we should probably also check using polling if we can send data.
-		int err = 0;
-		while ((err = is_kocket_queue_empty(&kocket_writing_queue)) > 0) {
-			u32 kocket_client_id = 0;
-			KocketStruct kocket_struct = {0};
-			if ((err = kocket_dequeue(&kocket_writing_queue, &kocket_struct, &kocket_client_id)) < 0) {
-				kocket_deinit(kocket, err, NULL);
-				WARNING_LOG("Failed to dequeue from the kocket_writing_queue.\n");
-				return err;
-			}
-			
-			if ((err = kocket_send(*kocket, kocket_client_id, kocket_struct)) < 0) {
-				kocket_deinit(kocket, err, NULL);
-				WARNING_LOG("Failed to send the queued kocket_struct.\n");
-				return err;
-			}
-		}
-
-		if (err < 0) {
-			kocket_deinit(kocket, err, NULL);
-			WARNING_LOG("An error occurred while checking if the kocket_writing_queue was empty.\n");
-			return err;
+		if ((ret = kocket_poll_write(kocket)) < 0) {
+			kocket_deinit(kocket, ret, NULL);
+			WARNING_LOG("An error occurred while polling write.\n");
+			return ret;
 		}
 	}
 	

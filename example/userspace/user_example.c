@@ -23,7 +23,7 @@ typedef enum InfoRequestTypes { LOG_BUFFER_SIZE, IS_LOG_BUFFER_EMPTY } InfoReque
 typedef enum ClientKocketTypes { KOCKET_LOG_TYPE = 0, KOCKET_INFO_REQUEST } ClientKocketTypes;
 
 int log_handler(KocketStruct kocket_struct) {
-	printf("SERVER_INFO: '%s'\n", kocket_struct.payload);
+	DEBUG_LOG("SERVER_INFO: '%s'\n", kocket_struct.payload);
 	return KOCKET_NO_ERROR;
 }
 
@@ -62,9 +62,9 @@ int main(void) {
 
 	// Randomly exchange some data with the server
 	KocketStruct info_request = {0};
-	info_request.type_id = KOCKET_LOG_TYPE;
+	info_request.type_id = KOCKET_INFO_REQUEST;
 	info_request.payload_size = sizeof(InfoRequestTypes);
-	info_request.payload = (u8*) calloc(sizeof(InfoRequestTypes), sizeof(u8));
+	info_request.payload = (u8*) kocket_calloc(sizeof(InfoRequestTypes), sizeof(u8));
 	if (info_request.payload == NULL) {
 		int ret = 0;
 		if ((ret = kocket_deinit(&kocket, -KOCKET_IO_ERROR, kocket_thread)) < 0) {
@@ -78,6 +78,7 @@ int main(void) {
 	mem_cpy(info_request.payload, LOG_BUFFER_SIZE, sizeof(InfoRequestTypes));
 	
 	if ((err = kocket_write(&info_request)) < 0) {
+		KOCKET_SAFE_FREE(info_request.payload);
 		int ret = 0;
 		if ((ret = kocket_deinit(&kocket, -KOCKET_IO_ERROR, kocket_thread)) < 0) {
 			ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-ret]);
@@ -108,9 +109,17 @@ int main(void) {
 		}
 		WARNING_LOG("Payload size doesn't match: found %u, but expected: %lu.\n", info_request_response.payload_size, sizeof(u32));
 		return -KOCKET_INVALID_PAYLOAD_SIZE;
+	} else if (*KOCKET_CAST_PTR(info_request_response.payload, int) < 0) {
+		int ret = 0;
+		if ((ret = kocket_deinit(&kocket, -KOCKET_IO_ERROR, kocket_thread)) < 0) {
+			ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-ret]);
+			return ret;
+		}
+		WARNING_LOG("The server returned an error code: %d.\n", *KOCKET_CAST_PTR(info_request_response.payload, int));
+		return -KOCKET_INVALID_PAYLOAD_SIZE;
 	}
 
-	printf("Logbuffer size: %lu\n", *KOCKET_CAST_PTR(info_request_response.payload + sizeof(u32), u64));
+	DEBUG_LOG("Logbuffer size: %lu\n", *KOCKET_CAST_PTR(info_request_response.payload + sizeof(u32), u64));
 
 	KOCKET_SAFE_FREE(info_request_response.payload);
 		

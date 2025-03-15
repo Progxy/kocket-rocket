@@ -164,7 +164,7 @@ typedef struct PACKED_STRUCT KocketStruct {
 	u8* payload;	
 } KocketStruct;
 
-typedef int (*KocketHandler)(KocketStruct);
+typedef int (*KocketHandler)(u32, KocketStruct);
 typedef struct KocketType {
 	char* type_name;
 	bool has_handler;
@@ -231,6 +231,7 @@ int kocket_enqueue(KocketQueue* kocket_queue, KocketStruct kocket_struct, u32 ko
 int kocket_dequeue(KocketQueue* kocket_queue, KocketStruct* kocket_struct, u32* kocket_client_id);
 int is_kocket_queue_empty(KocketQueue* kocket_queue) ;
 int kocket_dequeue_find(KocketQueue* kocket_queue, u64 req_id, KocketStruct* kocket_struct);
+int kocket_queue_get_n_client_id(KocketQueue* kocket_queue, u32 index, u32* kocket_client_id);
 int kocket_addr_to_bytes(const char* str_addr, u32* bytes_addr);
 
 /* -------------------------------------------------------------------------------------------------------- */
@@ -376,6 +377,26 @@ int kocket_dequeue_find(KocketQueue* kocket_queue, u64 req_id, KocketStruct* koc
 		
 	mutex_unlock(&(kocket_queue -> lock));
 
+	return KOCKET_NO_ERROR;
+}
+
+int kocket_queue_get_n_client_id(KocketQueue* kocket_queue, u32 index, u32* kocket_client_id) {
+	if (kocket_queue == NULL) {
+		WARNING_LOG("Invalid kocket_queue, the given kocket_queue is NULL.\n");
+		return -KOCKET_IO_ERROR;
+	}
+
+	mutex_lock(&(kocket_queue -> lock));
+	
+	if (kocket_queue -> size <= index) {
+		WARNING_LOG("Out of bound index: %u > %u (queue size).\n", index, kocket_queue -> size);
+		return -KOCKET_INVALID_PARAMETERS;
+	}
+
+	*kocket_client_id = (kocket_queue -> kocket_clients_ids)[index];
+	
+	mutex_unlock(&(kocket_queue -> lock));
+	
 	return KOCKET_NO_ERROR;
 }
 
