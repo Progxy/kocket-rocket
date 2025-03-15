@@ -48,7 +48,7 @@
 #ifdef _U_KOCKET_H_
 	#define print printf
 #else
-	#define print(fmt, ...) printk(KERN_INFO, fmt, ##__VA_ARGS__)
+	#define print(fmt, ...) printk(KERN_WARNING fmt, ##__VA_ARGS__)
 #endif //_U_KOCKET_H_
 
 // -------------------------------
@@ -172,6 +172,11 @@ typedef struct KocketType {
 } KocketType;
 
 #ifdef _K_KOCKET_H_
+typedef struct PollSocket {
+	u32 reg_events;
+	struct socket* socket;
+} PollSocket;
+
 typedef struct ServerKocket {
 	struct socket* socket;
 	int backlog;
@@ -181,7 +186,7 @@ typedef struct ServerKocket {
 	KocketType* kocket_types;
 	u32 kocket_types_cnt;
 	struct socket** clients;
-	u32* poll_events;
+	PollSocket* poll_sockets;
 	u32 clients_cnt;
 	bool use_secure_connection;
 } ServerKocket;
