@@ -48,7 +48,7 @@
 #ifdef _U_KOCKET_H_
 	#define print printf
 #else
-	#define print printk
+	#define print(fmt, ...) printk(KERN_INFO, fmt, ##__VA_ARGS__)
 #endif //_U_KOCKET_H_
 
 // -------------------------------

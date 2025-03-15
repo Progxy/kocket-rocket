@@ -97,6 +97,7 @@ int kocket_deinit(KocketStatus status, struct task_struct* kthread) {
 }
 
 static void kocket_deinit_thread(ServerKocket* kocket) {
+	DEBUG_LOG("kocket: %p\n", kocket);
 	if (kocket_deallocate_queue(&kocket_writing_queue)) {
 		WARNING_LOG("Failed to deallocate the queue.\n");
 	}
@@ -115,12 +116,17 @@ static void kocket_deinit_thread(ServerKocket* kocket) {
 	kocket -> clients_cnt = 0;
 	
 	// Close the server socket, to prevent incoming connections 
+	DEBUG_LOG("kocket -> socket: %p\n", kocket -> socket);
 	sock_release(kocket -> socket);
 
 	return;
 }
 
 int kocket_write(u32 kocket_client_id, KocketStruct* kocket_struct) {
+	mutex_lock(&kocket_status_lock);
+	if (kocket_status) return kocket_status;
+	mutex_unlock(&kocket_status_lock);
+	
 	u8 initialization_vector[64] = {0};
 	kocket_struct -> req_id = *KOCKET_CAST_PTR(cha_cha20(initialization_vector), u64);
 	
@@ -134,6 +140,10 @@ int kocket_write(u32 kocket_client_id, KocketStruct* kocket_struct) {
 }
 
 int kocket_read(u64 req_id, KocketStruct* kocket_struct, bool wait_response) {
+	mutex_lock(&kocket_status_lock);
+	if (kocket_status) return kocket_status;
+	mutex_unlock(&kocket_status_lock);
+	
 	int ret = 0;
 	if ((ret = kocket_dequeue_find(&kocket_reads_queue, req_id, kocket_struct)) < 0) {
 		WARNING_LOG("An error occurred while finding withing the queue.\n");
