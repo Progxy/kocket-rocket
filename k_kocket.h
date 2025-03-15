@@ -20,12 +20,20 @@
 
 #include "common_kocket.h"
 #include "./crypto/chacha20.h"
+#include <linux/signal.h>
 
+// ------------------
+//  Static Variables
+// ------------------
+static struct task_struct* kthread = NULL;
+
+/* -------------------------------------------------------------------------------------------------------- */
 // ------------------------
 //  Functions Declarations
 // ------------------------
-int kocket_init(ServerKocket kocket, struct task_struct* kthread);
-int kocket_deinit(KocketStatus status, struct task_struct* kthread);
+int kocket_init(ServerKocket kocket);
+int kocket_deinit(KocketStatus status);
+static void kocket_deinit_thread(ServerKocket* kocket, KocketStatus status);
 int kocket_write(u32 kocket_client_id, KocketStruct* kocket_struct);
 int kocket_read(u64 req_id, KocketStruct* kocket_struct, bool wait_response);
 static int kocket_send(ServerKocket kocket, u32 kocket_client_id, KocketStruct kocket_struct);
@@ -34,7 +42,7 @@ static int kocket_poll_read_accept(ServerKocket* kocket);
 int kocket_dispatcher(void* kocket_arg);
 
 /* -------------------------------------------------------------------------------------------------------- */
-int kocket_init(ServerKocket kocket, struct task_struct* kthread) {
+int kocket_init(ServerKocket kocket) {
 	int err = sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP, &(kocket.socket));
 	if (kocket.socket == NULL) {
 		PERROR_LOG("An error occurred while creating the socket", err);
@@ -108,19 +116,28 @@ int kocket_init(ServerKocket kocket, struct task_struct* kthread) {
 	return KOCKET_NO_ERROR;
 }
 
-int kocket_deinit(KocketStatus status, struct task_struct* kthread) {
-	if (kthread != NULL && kthread -> __state != TASK_DEAD) {
+#include <linux/sched.h>
+int kocket_deinit(KocketStatus status) {
+	WARNING_LOG("kthread: %p, __state: %u", kthread, kthread -> __state);
+	if (!IS_ERR_OR_NULL(kthread) && task_state_index(kthread) != TASK_DEAD) {
+		WARNING_LOG("task_state: %d", task_state_index(kthread));
 		kthread_stop(kthread);
-		put_task_struct(kthread);
 	}
 	
+	mutex_lock(&kocket_status_lock);
+
 	kocket_status = status;
+
+	mutex_unlock(&kocket_status_lock);
 
 	return KOCKET_NO_ERROR;
 }
 
-static void kocket_deinit_thread(ServerKocket* kocket) {
-	DEBUG_LOG("kocket: %p\n", kocket);
+static void kocket_deinit_thread(ServerKocket* kocket, KocketStatus status) {
+	mutex_lock(&kocket_status_lock);
+	kocket_status = status;
+	mutex_unlock(&kocket_status_lock);
+	
 	if (kocket_deallocate_queue(&kocket_writing_queue)) {
 		WARNING_LOG("Failed to deallocate the queue.\n");
 	}
@@ -139,7 +156,6 @@ static void kocket_deinit_thread(ServerKocket* kocket) {
 	kocket -> clients_cnt = 0;
 	
 	// Close the server socket, to prevent incoming connections 
-	DEBUG_LOG("kocket -> socket: %p\n", kocket -> socket);
 	sock_release(kocket -> socket);
 
 	return;
@@ -259,6 +275,11 @@ static int kocket_recv(ServerKocket kocket, u32 kocket_client_id) {
 }
 
 static int kocket_release_client(ServerKocket* kocket, u32 index) {
+	if (kocket -> clients_cnt <= index) {
+		WARNING_LOG("Index out of bound: %u > %u\n", index, kocket -> clients_cnt);
+		return -KOCKET_INVALID_PARAMETERS;
+	}
+	
 	sock_release((kocket -> clients)[index]);
 	
 	mem_move(kocket -> poll_sockets + index, kocket -> poll_sockets + index + 1, sizeof(PollSocket) * (kocket -> clients_cnt - index - 1));
@@ -294,14 +315,18 @@ static int kocket_poll(PollSocket* poll_sockets, u32 sks_cnt, u32 timeout) {
 			sk -> sk_err                                ||
 			!skb_queue_empty(&(sk -> sk_error_queue))   ||
 			(sk -> sk_shutdown & RCV_SHUTDOWN),
-			timeout
+			timeout / sks_cnt
 		);
-
-		if (!skb_queue_empty(&(sk -> sk_receive_queue)) || (sk -> sk_state == TCP_LISTEN)) poll_sockets[i].reg_events |= POLLIN | POLLRDNORM;
+		
+		if (sk -> sk_state == TCP_LISTEN) {
+			poll_sockets[i].reg_events = inet_csk_listen_poll(sk);
+			continue;
+		}
+		
+		if (!skb_queue_empty(&(sk -> sk_receive_queue))) poll_sockets[i].reg_events |= POLLIN | POLLRDNORM;
 		if (sock_writeable(sk)) poll_sockets[i].reg_events |= POLLOUT | POLLWRNORM;
 		if (sk -> sk_err || !skb_queue_empty(&(sk -> sk_error_queue))) poll_sockets[i].reg_events |= POLLERR;
 		if (sk -> sk_shutdown & RCV_SHUTDOWN) poll_sockets[i].reg_events |= POLLHUP;
-		DEBUG_LOG("reg_events[%u]: 0x%X", i, poll_sockets[i].reg_events);
 		mask |= poll_sockets[i].reg_events;
 	}
 
@@ -385,33 +410,39 @@ static int kocket_poll_write(ServerKocket* kocket) {
 int kocket_dispatcher(void* kocket_arg) {
 	ServerKocket kocket = *KOCKET_CAST_PTR(kocket_arg, ServerKocket);
 	KOCKET_SAFE_FREE(kocket_arg);
+	
+	allow_signal(SIGKILL | SIGTERM);
 
+	int err = KOCKET_NO_ERROR;
 	while (!kthread_should_stop()) {
-		DEBUG_LOG("Call me maybe.");
 		int ret = 0;
 		if ((ret = kocket_poll(kocket.poll_sockets, kocket.clients_cnt + 1, KOCKET_TIMEOUT_MS)) == 0) continue;
 		else if (ret < 0) {
 			WARNING_LOG("An error occurred while polling.\n");
-			kocket_deinit_thread(&kocket);
-			return ret;
+			err = ret;
+			break;
 		}
 		
 		if ((ret = kocket_poll_read_accept(&kocket)) < 0) {
-			kocket_deinit_thread(&kocket);
 			WARNING_LOG("An error occurred while polling read/accept.\n");
-			return ret;
+			err = ret;
+			break;
 		}
 
 		if ((ret = kocket_poll_write(&kocket)) < 0) {
-			kocket_deinit_thread(&kocket);
 			WARNING_LOG("An error occurred while polling write.\n");
-			return ret;
+			err = ret;
+			break;
 		}
+
+		if (signal_pending(kthread)) break;
 	}
 	
-	kocket_deinit_thread(&kocket);
+	kocket_deinit_thread(&kocket, err);
 
-	return KOCKET_NO_ERROR;
+	// do_exit(0);
+		
+	return err;
 }
 
 #endif //_K_KOCKET_H_

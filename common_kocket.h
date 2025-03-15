@@ -73,7 +73,11 @@
 #define TODO(msg) print(COLOR_STR("TODO: " __FILE__ ":%u: ", TODO_COLOR) msg "\n", __LINE__), assert(FALSE)
 
 #ifdef _DEBUG
-	#define DEBUG_LOG(format, ...) print(COLOR_STR("DEBUG:" __FILE__ ":%u: ", DEBUG_COLOR) format, __LINE__, ##__VA_ARGS__)
+#ifdef _U_KOCKET_H_	
+#define DEBUG_LOG(format, ...) print(COLOR_STR("DEBUG:" __FILE__ ":%u: ", DEBUG_COLOR) format, __LINE__, ##__VA_ARGS__)
+#else
+#define DEBUG_LOG(...) printk(KERN_INFO "OSAS_INFO: " __VA_ARGS__)
+#endif //_U_KOCKET_H_
 #else 
     #define DEBUG_LOG(...)
 #endif //_DEBUG
@@ -147,13 +151,13 @@ static const char* kocket_status_str[] = {
 #ifdef _U_KOCKET_H_
 	#include <pthread.h>
 	typedef pthread_mutex_t mutex_t;
-	#define mutex_init(mutex_lock)    pthread_mutex_init(mutex_lock, NULL)
-	#define mutex_lock(mutex_lock)    pthread_mutex_lock(mutex_lock)
-	#define mutex_unlock(mutex_lock)  pthread_mutex_unlock(mutex_lock)
-	#define mutex_destroy(mutex_lock) pthread_mutex_destroy(mutex_lock)
+	#define mutex_init(mutex_lock) pthread_mutex_init((mutex_lock), NULL)
+	#define mutex_lock             pthread_mutex_lock
+	#define mutex_unlock           pthread_mutex_unlock
+	#define mutex_destroy          pthread_mutex_destroy
 #else
 	typedef struct mutex mutex_t;
-	#define mutex_destroy(mutex_lock)
+	#define mutex_destroy mutex_unlock
 #endif //_U_KOCKET_H_
 
 // TODO: Should probably change KocketStruct with KocketPacket or something similar
@@ -263,6 +267,7 @@ int kocket_deallocate_queue(KocketQueue* kocket_queue) {
 
 	mutex_lock(&(kocket_queue -> lock));
 	
+	WARNING_LOG("size: %u, kocket_structs: %p, kocket_clients_ids: %p\n", kocket_queue -> size, kocket_queue -> kocket_structs, kocket_queue -> kocket_clients_ids);
 	for (u32 i = 0; i < kocket_queue -> size; ++i) KOCKET_SAFE_FREE((kocket_queue -> kocket_structs)[i].payload);
 	KOCKET_SAFE_FREE(kocket_queue -> kocket_structs);
 	KOCKET_SAFE_FREE(kocket_queue -> kocket_clients_ids);
