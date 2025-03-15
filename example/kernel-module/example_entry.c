@@ -130,6 +130,7 @@ static s32 __init example_init(void) {
 	
 	int err = 0;
 	ServerKocket kocket = {0};
+	kocket.backlog = 5;
 	kocket.port = HOST_PORT;
 	kocket.address = INADDR_ANY;
 	kocket.kocket_types = kocket_types;

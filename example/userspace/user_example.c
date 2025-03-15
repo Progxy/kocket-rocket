@@ -17,7 +17,6 @@ typedef u8 bool;
 #include "../../u_kocket.h"
 
 #define HOST_PORT 6969
-#define HOST_ADDRESS "127.0.0.1"
 
 typedef enum InfoRequestTypes { LOG_BUFFER_SIZE, IS_LOG_BUFFER_EMPTY } InfoRequestTypes;
 typedef enum ClientKocketTypes { KOCKET_LOG_TYPE = 0, KOCKET_INFO_REQUEST } ClientKocketTypes;
@@ -27,7 +26,12 @@ int log_handler(KocketStruct kocket_struct) {
 	return KOCKET_NO_ERROR;
 }
 
-int main(void) {
+int main(int argc, char* argv[]) {
+	if (argc < 2) {
+		DEBUG_LOG("Usage: user_example <ip address>\n");
+		return -1;
+	}
+	
 	KocketType kocket_log_type = {
 		.type_name = "LOG",
 	   	.has_handler = TRUE,
@@ -44,7 +48,8 @@ int main(void) {
 	
 	int err = 0;
 	ClientKocket kocket = {0};
-	if ((err = kocket_addr_to_bytes(HOST_ADDRESS, &kocket.address)) < 0) {
+	DEBUG_LOG("Connecting to address '%s' on port %u\n", argv[1], HOST_PORT);
+	if ((err = kocket_addr_to_bytes(argv[1], &kocket.address)) < 0) {
 		WARNING_LOG("An error occurred while converting the address from string to bytes.\n");
 		return err;
 	}
@@ -54,8 +59,7 @@ int main(void) {
 	kocket.kocket_types_cnt = KOCKET_ARR_SIZE(kocket_types);
 	kocket.use_secure_connection = FALSE;
 	
-	pthread_t kocket_thread = 0;
-	if ((err = kocket_init(&kocket, &kocket_thread)) < 0) {
+	if ((err = kocket_init(kocket)) < 0) {
 		ERROR_LOG("An error occurred while initializing the kocket.\n", kocket_status_str[-err]);
 		return err;
 	}
@@ -67,7 +71,7 @@ int main(void) {
 	info_request.payload = (u8*) kocket_calloc(sizeof(InfoRequestTypes), sizeof(u8));
 	if (info_request.payload == NULL) {
 		int ret = 0;
-		if ((ret = kocket_deinit(&kocket, -KOCKET_IO_ERROR, kocket_thread)) < 0) {
+		if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
 			ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-ret]);
 			return ret;
 		}
@@ -80,7 +84,7 @@ int main(void) {
 	if ((err = kocket_write(&info_request)) < 0) {
 		KOCKET_SAFE_FREE(info_request.payload);
 		int ret = 0;
-		if ((ret = kocket_deinit(&kocket, -KOCKET_IO_ERROR, kocket_thread)) < 0) {
+		if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
 			ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-ret]);
 			return ret;
 		}
@@ -93,7 +97,7 @@ int main(void) {
 	KocketStruct info_request_response = {0};
 	if ((err = kocket_read(info_request.req_id, &info_request_response, FALSE)) < 0) {
 		int ret = 0;
-		if ((ret = kocket_deinit(&kocket, -KOCKET_IO_ERROR, kocket_thread)) < 0) {
+		if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
 			ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-ret]);
 			return ret;
 		}
@@ -103,7 +107,7 @@ int main(void) {
 
 	if (info_request_response.payload_size != sizeof(u32)) {
 		int ret = 0;
-		if ((ret = kocket_deinit(&kocket, -KOCKET_IO_ERROR, kocket_thread)) < 0) {
+		if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
 			ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-ret]);
 			return ret;
 		}
@@ -111,7 +115,7 @@ int main(void) {
 		return -KOCKET_INVALID_PAYLOAD_SIZE;
 	} else if (*KOCKET_CAST_PTR(info_request_response.payload, int) < 0) {
 		int ret = 0;
-		if ((ret = kocket_deinit(&kocket, -KOCKET_IO_ERROR, kocket_thread)) < 0) {
+		if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
 			ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-ret]);
 			return ret;
 		}
@@ -123,7 +127,7 @@ int main(void) {
 
 	KOCKET_SAFE_FREE(info_request_response.payload);
 		
-	if ((err = kocket_deinit(&kocket, KOCKET_NO_ERROR, kocket_thread)) < 0) {
+	if ((err = kocket_deinit(KOCKET_NO_ERROR)) < 0) {
 		ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-err]);
 		return err;
 	}

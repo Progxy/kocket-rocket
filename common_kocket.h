@@ -168,7 +168,12 @@ typedef struct PACKED_STRUCT KocketStruct {
 	u8* payload;	
 } KocketStruct;
 
-typedef int (*KocketHandler)(u32, KocketStruct);
+#ifdef _U_KOCKET_H_
+	typedef int (*KocketHandler)(KocketStruct);
+#else
+	typedef int (*KocketHandler)(u32, KocketStruct);
+#endif //_U_KOCKET_H_
+
 typedef struct KocketType {
 	char* type_name;
 	bool has_handler;

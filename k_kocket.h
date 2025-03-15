@@ -20,6 +20,7 @@
 
 #include "common_kocket.h"
 #include "./crypto/chacha20.h"
+#include <linux/sched.h>
 #include <linux/signal.h>
 
 // ------------------
@@ -34,6 +35,7 @@ static struct task_struct* kthread = NULL;
 int kocket_init(ServerKocket kocket);
 int kocket_deinit(KocketStatus status);
 static void kocket_deinit_thread(ServerKocket* kocket, KocketStatus status);
+static inline KocketStatus check_kocket_status(void);
 int kocket_write(u32 kocket_client_id, KocketStruct* kocket_struct);
 int kocket_read(u64 req_id, KocketStruct* kocket_struct, bool wait_response);
 static int kocket_send(ServerKocket kocket, u32 kocket_client_id, KocketStruct kocket_struct);
@@ -116,18 +118,13 @@ int kocket_init(ServerKocket kocket) {
 	return KOCKET_NO_ERROR;
 }
 
-#include <linux/sched.h>
 int kocket_deinit(KocketStatus status) {
-	WARNING_LOG("kthread: %p, __state: %u", kthread, kthread -> __state);
 	if (!IS_ERR_OR_NULL(kthread) && task_state_index(kthread) != TASK_DEAD) {
-		WARNING_LOG("task_state: %d", task_state_index(kthread));
 		kthread_stop(kthread);
 	}
 	
 	mutex_lock(&kocket_status_lock);
-
 	kocket_status = status;
-
 	mutex_unlock(&kocket_status_lock);
 
 	return KOCKET_NO_ERROR;
@@ -161,10 +158,17 @@ static void kocket_deinit_thread(ServerKocket* kocket, KocketStatus status) {
 	return;
 }
 
-int kocket_write(u32 kocket_client_id, KocketStruct* kocket_struct) {
+static inline KocketStatus check_kocket_status(void) {
+	KocketStatus status = KOCKET_NO_ERROR;
 	mutex_lock(&kocket_status_lock);
-	if (kocket_status) return kocket_status;
+	status = kocket_status;
 	mutex_unlock(&kocket_status_lock);
+	return status;
+}
+
+int kocket_write(u32 kocket_client_id, KocketStruct* kocket_struct) {
+	KocketStatus status = KOCKET_NO_ERROR;
+	if ((status = check_kocket_status()) < 0) return status;
 	
 	u8 initialization_vector[64] = {0};
 	kocket_struct -> req_id = *KOCKET_CAST_PTR(cha_cha20(initialization_vector), u64);
@@ -179,9 +183,8 @@ int kocket_write(u32 kocket_client_id, KocketStruct* kocket_struct) {
 }
 
 int kocket_read(u64 req_id, KocketStruct* kocket_struct, bool wait_response) {
-	mutex_lock(&kocket_status_lock);
-	if (kocket_status) return kocket_status;
-	mutex_unlock(&kocket_status_lock);
+	KocketStatus status = KOCKET_NO_ERROR;
+	if ((status = check_kocket_status()) < 0) return status;
 	
 	int ret = 0;
 	if ((ret = kocket_dequeue_find(&kocket_reads_queue, req_id, kocket_struct)) < 0) {
@@ -440,8 +443,6 @@ int kocket_dispatcher(void* kocket_arg) {
 	
 	kocket_deinit_thread(&kocket, err);
 
-	// do_exit(0);
-		
 	return err;
 }
 
