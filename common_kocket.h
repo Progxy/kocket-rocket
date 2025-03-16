@@ -272,12 +272,13 @@ int kocket_deallocate_queue(KocketQueue* kocket_queue, bool clean_payloads) {
 
 	mutex_lock(&(kocket_queue -> lock));
 	
+	DEBUG_LOG("kocket_queue -> size: %u\n", kocket_queue -> size);
 	for (u32 i = 0; i < kocket_queue -> size && clean_payloads; ++i) KOCKET_SAFE_FREE((kocket_queue -> kocket_structs)[i].payload);
 	KOCKET_SAFE_FREE(kocket_queue -> kocket_structs);
 	KOCKET_SAFE_FREE(kocket_queue -> kocket_clients_ids);
 	kocket_queue -> size = 0;
 	
-	mutex_destroy(&(kocket_queue -> lock));
+	mutex_unlock(&(kocket_queue -> lock));
 
 	return KOCKET_NO_ERROR;
 }
@@ -292,6 +293,7 @@ int kocket_enqueue(KocketQueue* kocket_queue, KocketStruct kocket_struct, u32 ko
 	
 	kocket_queue -> kocket_structs = kocket_realloc(kocket_queue -> kocket_structs, sizeof(KocketStruct) * (++(kocket_queue -> size)));
 	if (kocket_queue -> kocket_structs == NULL) {
+		mutex_unlock(&(kocket_queue -> lock));
 		WARNING_LOG("Failed to reallocate the kocket_structs.\n");
 		return -KOCKET_IO_ERROR;
 	}
@@ -300,6 +302,7 @@ int kocket_enqueue(KocketQueue* kocket_queue, KocketStruct kocket_struct, u32 ko
 	
 	kocket_queue -> kocket_clients_ids = kocket_realloc(kocket_queue -> kocket_clients_ids, sizeof(int) * kocket_queue -> size);
 	if (kocket_queue -> kocket_clients_ids == NULL) {
+		mutex_unlock(&(kocket_queue -> lock));
 		WARNING_LOG("Failed to reallocate the kocket_clients_ids.\n");
 		return -KOCKET_IO_ERROR;
 	}
@@ -324,12 +327,14 @@ int kocket_dequeue(KocketQueue* kocket_queue, KocketStruct* kocket_struct, u32* 
 	
 	kocket_queue -> kocket_structs = kocket_realloc(kocket_queue -> kocket_structs, sizeof(KocketStruct) * (--(kocket_queue -> size)));
 	if (kocket_queue -> kocket_structs == NULL) {
+		mutex_unlock(&(kocket_queue -> lock));
 		WARNING_LOG("Failed to reallocate the kocket_structs.\n");
 		return -KOCKET_IO_ERROR;
 	}
 	
 	kocket_queue -> kocket_clients_ids = kocket_realloc(kocket_queue -> kocket_clients_ids, sizeof(int) * kocket_queue -> size);
 	if (kocket_queue -> kocket_clients_ids == NULL) {
+		mutex_unlock(&(kocket_queue -> lock));
 		WARNING_LOG("Failed to reallocate the kocket_clients_ids.\n");
 		return -KOCKET_IO_ERROR;
 	}
@@ -369,7 +374,7 @@ int kocket_dequeue_find(KocketQueue* kocket_queue, u64 req_id, KocketStruct* koc
 
 	if (index >= kocket_queue -> size) {
 		mutex_unlock(&(kocket_queue -> lock));
-		return -KOCKET_REQ_NOT_FOUND;
+		return KOCKET_REQ_NOT_FOUND;
 	}
 	
 	*kocket_struct = (kocket_queue -> kocket_structs)[index];
@@ -379,12 +384,14 @@ int kocket_dequeue_find(KocketQueue* kocket_queue, u64 req_id, KocketStruct* koc
 
 	kocket_queue -> kocket_structs = kocket_realloc(kocket_queue -> kocket_structs, sizeof(KocketStruct) * (--(kocket_queue -> size)));
 	if (kocket_queue -> kocket_structs == NULL) {
+		mutex_unlock(&(kocket_queue -> lock));
 		WARNING_LOG("Failed to reallocate the kocket_structs.\n");
 		return -KOCKET_IO_ERROR;
 	}
 	
 	kocket_queue -> kocket_clients_ids = kocket_realloc(kocket_queue -> kocket_clients_ids, sizeof(int) * kocket_queue -> size);
 	if (kocket_queue -> kocket_clients_ids == NULL) {
+		mutex_unlock(&(kocket_queue -> lock));
 		WARNING_LOG("Failed to reallocate the kocket_clients_ids.\n");
 		return -KOCKET_IO_ERROR;
 	}
@@ -403,6 +410,7 @@ int kocket_queue_get_n_client_id(KocketQueue* kocket_queue, u32 index, u32* kock
 	mutex_lock(&(kocket_queue -> lock));
 	
 	if (kocket_queue -> size <= index) {
+		mutex_unlock(&(kocket_queue -> lock));
 		WARNING_LOG("Out of bound index: %u > %u (queue size).\n", index, kocket_queue -> size);
 		return -KOCKET_INVALID_PARAMETERS;
 	}

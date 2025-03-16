@@ -3,3 +3,6 @@ DEFINITIONS = -D_DEBUG
 
 user_example: user_example.c
 	gcc $(FLAGS) $(DEFINITIONS) $< -o $@
+
+clean:
+	rm user_example

@@ -124,7 +124,7 @@ int kocket_deinit(KocketStatus status) {
 	
 	mutex_lock(&kocket_status_lock);
 	kocket_status = status;
-	mutex_destroy(&kocket_status_lock);
+	mutex_unlock(&kocket_status_lock);
 
 	return err;
 }
@@ -141,6 +141,7 @@ int kocket_write(KocketStruct* kocket_struct) {
 		WARNING_LOG("Failed to enqueue the given kocket_struct.\n");
 		return err;
 	}
+
 	return KOCKET_NO_ERROR;
 }
 
@@ -156,6 +157,7 @@ int kocket_read(u64 req_id, KocketStruct* kocket_struct, bool wait_response) {
 	
 	if (ret == KOCKET_REQ_NOT_FOUND && wait_response) {
 		// TODO: find a way to wait until the response with matching req_id arrives.
+		WARNING_LOG("res not found.\n");
 		return KOCKET_NO_ERROR;
 	} else if (ret == KOCKET_REQ_NOT_FOUND) return KOCKET_NO_ERROR;
 
@@ -179,6 +181,8 @@ static int kocket_send(ClientKocket kocket, KocketStruct kocket_struct) {
 		return -KOCKET_IO_ERROR;
 	}
 	
+	DEBUG_LOG("Sent %u bytes to server.\n", payload_size);	
+
 	KOCKET_SAFE_FREE(payload);
 
 	return KOCKET_NO_ERROR;
@@ -231,6 +235,7 @@ static KocketStatus thread_should_stop(void) {
 	KocketStatus status = TRUE;
 	mutex_lock(&kocket_status_lock); 
     status = kocket_status; 
+	WARNING_LOG("kocket_status: %u - '%s'\n", kocket_status, kocket_status_str[kocket_status]);
 	mutex_unlock(&kocket_status_lock);
 	return status;
 }
@@ -286,9 +291,10 @@ void* kocket_dispatcher(void* kocket_arg) {
 	}
 	
 	close(kocket.socket);
-	stop_thread();
 
-	return (void*)(intptr_t)err;
+	WARNING_LOG("Closed socket and thread.\n");
+
+	return (void*)(intptr_t) err;
 }
 
 #endif //_U_KOCKET_H_
