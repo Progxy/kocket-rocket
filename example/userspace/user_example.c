@@ -70,56 +70,55 @@ int main(int argc, char* argv[]) {
 	info_request.payload_size = sizeof(InfoRequestTypes);
 	info_request.payload = (u8*) kocket_calloc(sizeof(InfoRequestTypes), sizeof(u8));
 	if (info_request.payload == NULL) {
+		WARNING_LOG("Failed to allocate the payload.\n");
 		int ret = 0;
 		if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
 			ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-ret]);
 			return ret;
 		}
-		WARNING_LOG("Failed to allocate the payload.\n");
 		return -1;
 	}
 	
 	mem_cpy(info_request.payload, LOG_BUFFER_SIZE, sizeof(InfoRequestTypes));
 	
 	if ((err = kocket_write(&info_request)) < 0) {
-		KOCKET_SAFE_FREE(info_request.payload);
+		ERROR_LOG("An error occurred while writing to the kocket.\n", kocket_status_str[-err]);
 		int ret = 0;
 		if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
 			ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-ret]);
 			return ret;
 		}
-		ERROR_LOG("An error occurred while writing to the kocket.\n", kocket_status_str[-err]);
 		return err;
 	}
 
-	KOCKET_SAFE_FREE(info_request.payload);
-
 	KocketStruct info_request_response = {0};
 	if ((err = kocket_read(info_request.req_id, &info_request_response, FALSE)) < 0) {
+		ERROR_LOG("An error occurred while reading from the kocket.\n", kocket_status_str[-err]);
 		int ret = 0;
 		if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
 			ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-ret]);
 			return ret;
 		}
-		ERROR_LOG("An error occurred while reading from the kocket.\n", kocket_status_str[-err]);
 		return err;
 	}
 
 	if (info_request_response.payload_size != sizeof(u32)) {
+		KOCKET_SAFE_FREE(info_request_response.payload);
+		WARNING_LOG("Payload size doesn't match: found %u, but expected: %lu.\n", info_request_response.payload_size, sizeof(u32));
 		int ret = 0;
 		if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
 			ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-ret]);
 			return ret;
 		}
-		WARNING_LOG("Payload size doesn't match: found %u, but expected: %lu.\n", info_request_response.payload_size, sizeof(u32));
 		return -KOCKET_INVALID_PAYLOAD_SIZE;
 	} else if (*KOCKET_CAST_PTR(info_request_response.payload, int) < 0) {
+		KOCKET_SAFE_FREE(info_request_response.payload);
+		WARNING_LOG("The server returned an error code: %d.\n", *KOCKET_CAST_PTR(info_request_response.payload, int));
 		int ret = 0;
 		if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
 			ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-ret]);
 			return ret;
 		}
-		WARNING_LOG("The server returned an error code: %d.\n", *KOCKET_CAST_PTR(info_request_response.payload, int));
 		return -KOCKET_INVALID_PAYLOAD_SIZE;
 	}
 

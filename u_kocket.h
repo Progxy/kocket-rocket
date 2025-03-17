@@ -106,14 +106,17 @@ int kocket_init(ClientKocket kocket) {
 }
 
 int kocket_deinit(KocketStatus status) {
-	int err = KOCKET_NO_ERROR;
+	int err = 0;
+	void* pthread_err = NULL;
 	
 	stop_thread();
-	if (pthread_join(kocket_thread, (void**) &err)) {
+	
+	if (pthread_join(kocket_thread, &pthread_err)) {
 		WARNING_LOG("An error occurred while joining the thread.\n");
 		err = -KOCKET_IO_ERROR;
-	} else if (err < 0) {
+	} else if (pthread_err != NULL) {
 		WARNING_LOG("The kocket_thread failed during execution.\n");
+		err = (int) ((intptr_t) pthread_err);
 	}
 
 	if ((err = kocket_deallocate_queue(&kocket_writing_queue)) < 0) {
@@ -126,7 +129,7 @@ int kocket_deinit(KocketStatus status) {
 	
 	mutex_lock(&kocket_status_lock);
 	kocket_status = status;
-	mutex_unlock(&kocket_status_lock);
+	mutex_destroy(&kocket_status_lock);
 
 	return err;
 }
@@ -144,6 +147,8 @@ int kocket_write(KocketStruct* kocket_struct) {
 		return err;
 	}
 
+	WARNING_LOG("Appended to queue the following req_id: %lu\n", kocket_struct -> req_id);
+
 	return KOCKET_NO_ERROR;
 }
 
@@ -159,9 +164,12 @@ int kocket_read(u64 req_id, KocketStruct* kocket_struct, bool wait_response) {
 	
 	if (ret == KOCKET_REQ_NOT_FOUND && wait_response) {
 		// TODO: find a way to wait until the response with matching req_id arrives.
-		WARNING_LOG("res not found.\n");
+		WARNING_LOG("res %lu not found.\n", req_id);
 		return KOCKET_NO_ERROR;
-	} else if (ret == KOCKET_REQ_NOT_FOUND) return KOCKET_NO_ERROR;
+	} else if (ret == KOCKET_REQ_NOT_FOUND) {
+		WARNING_LOG("res %lu not found.\n", req_id);
+		return KOCKET_NO_ERROR;
+	}
 
 	return KOCKET_NO_ERROR;
 }
@@ -245,7 +253,7 @@ static KocketStatus thread_should_stop(void) {
 	KocketStatus status = TRUE;
 	mutex_lock(&kocket_status_lock); 
     status = kocket_status; 
-	WARNING_LOG("kocket_status: %u - '%s'\n", kocket_status, kocket_status_str[kocket_status]);
+	DEBUG_LOG("kocket_status: %u - '%s'\n", kocket_status, kocket_status_str[kocket_status]);
 	mutex_unlock(&kocket_status_lock);
 	return status;
 }
@@ -258,6 +266,8 @@ static int kocket_poll_write(ClientKocket* kocket) {
 		return err;
 	} else if (err == 0) return KOCKET_NO_ERROR;
 	
+	WARNING_LOG("kocket queue not empty: %u\n", err);
+
 	u32 kocket_client_id = 0;
 	KocketStruct kocket_struct = {0};
 	if ((err = kocket_dequeue(&kocket_writing_queue, &kocket_struct, &kocket_client_id)) < 0) {
@@ -270,6 +280,8 @@ static int kocket_poll_write(ClientKocket* kocket) {
 		return err;
 	}
 	
+	KOCKET_SAFE_FREE(kocket_struct.payload);
+
 	return KOCKET_NO_ERROR;
 }
 
@@ -280,13 +292,16 @@ void* kocket_dispatcher(void* kocket_arg) {
 	
 	int err = 0;
 	while (!thread_should_stop()) {
+		DEBUG_LOG("revents: 0x%X\n", kocket.poll_fd.revents);
 		int ret = poll(&(kocket.poll_fd), 1, KOCKET_TIMEOUT_MS);
+		DEBUG_LOG("revents: 0x%X\n", kocket.poll_fd.revents);
 		if (ret < 0) {
 			PERROR_LOG("Failed to perform the read/accept poll");
 			err = -KOCKET_IO_ERROR;
 			break;
 		} else if (ret == 0) continue;
 		
+
 		if ((kocket.poll_fd.revents & POLLIN) && (ret = kocket_recv(kocket)) < 0) {
 			WARNING_LOG("An error occurred while receiving.\n");
 			err = ret;

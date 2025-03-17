@@ -278,7 +278,7 @@ int kocket_deallocate_queue(KocketQueue* kocket_queue) {
 	KOCKET_SAFE_FREE(kocket_queue -> kocket_clients_ids);
 	kocket_queue -> size = 0;
 	
-	mutex_unlock(&(kocket_queue -> lock));
+	mutex_destroy(&(kocket_queue -> lock));
 
 	return KOCKET_NO_ERROR;
 }
