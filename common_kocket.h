@@ -73,11 +73,11 @@
 #define TODO(msg) print(COLOR_STR("TODO: " __FILE__ ":%u: ", TODO_COLOR) msg "\n", __LINE__), assert(FALSE)
 
 #ifdef _DEBUG
-#ifdef _U_KOCKET_H_	
-#define DEBUG_LOG(format, ...) print(COLOR_STR("DEBUG:" __FILE__ ":%u: ", DEBUG_COLOR) format, __LINE__, ##__VA_ARGS__)
-#else
-#define DEBUG_LOG(...) printk(KERN_INFO "OSAS_INFO: " __VA_ARGS__)
-#endif //_U_KOCKET_H_
+	#ifdef _U_KOCKET_H_	
+		#define DEBUG_LOG(format, ...) print(COLOR_STR("DEBUG:" __FILE__ ":%u: ", DEBUG_COLOR) format, __LINE__, ##__VA_ARGS__)
+	#else
+		#define DEBUG_LOG(format, ...) printk(KERN_INFO COLOR_STR("DEBUG:" __FILE__ ":%u: ", DEBUG_COLOR) format, __LINE__, ##__VA_ARGS__)
+	#endif //_U_KOCKET_H_
 #else 
     #define DEBUG_LOG(...)
 #endif //_DEBUG
@@ -240,7 +240,7 @@ static mutex_t kocket_status_lock = {0};
 //  Functions Declarations
 // ------------------------
 int kocket_alloc_queue(KocketQueue* kocket_queue);
-int kocket_deallocate_queue(KocketQueue* kocket_queue, bool clean_payloads);
+int kocket_deallocate_queue(KocketQueue* kocket_queue);
 int kocket_enqueue(KocketQueue* kocket_queue, KocketStruct kocket_struct, u32 kocket_client_id);
 int kocket_dequeue(KocketQueue* kocket_queue, KocketStruct* kocket_struct, u32* kocket_client_id);
 int is_kocket_queue_empty(KocketQueue* kocket_queue) ;
@@ -264,7 +264,7 @@ int kocket_alloc_queue(KocketQueue* kocket_queue) {
 	return KOCKET_NO_ERROR;
 }
 
-int kocket_deallocate_queue(KocketQueue* kocket_queue, bool clean_payloads) {
+int kocket_deallocate_queue(KocketQueue* kocket_queue) {
 	if (kocket_queue == NULL) {
 		WARNING_LOG("Invalid kocket_queue, the given kocket_queue is NULL.\n");
 		return -KOCKET_IO_ERROR;
@@ -273,7 +273,7 @@ int kocket_deallocate_queue(KocketQueue* kocket_queue, bool clean_payloads) {
 	mutex_lock(&(kocket_queue -> lock));
 	
 	DEBUG_LOG("kocket_queue -> size: %u\n", kocket_queue -> size);
-	for (u32 i = 0; i < kocket_queue -> size && clean_payloads; ++i) KOCKET_SAFE_FREE((kocket_queue -> kocket_structs)[i].payload);
+	for (u32 i = 0; i < kocket_queue -> size; ++i) KOCKET_SAFE_FREE((kocket_queue -> kocket_structs)[i].payload);
 	KOCKET_SAFE_FREE(kocket_queue -> kocket_structs);
 	KOCKET_SAFE_FREE(kocket_queue -> kocket_clients_ids);
 	kocket_queue -> size = 0;

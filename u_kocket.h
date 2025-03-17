@@ -88,7 +88,7 @@ int kocket_init(ClientKocket kocket) {
 	if ((err = kocket_alloc_queue(&kocket_reads_queue)) < 0) {
 		close(kocket.socket);
 		mutex_destroy(&kocket_status_lock);
-		kocket_deallocate_queue(&kocket_writing_queue, FALSE);
+		kocket_deallocate_queue(&kocket_writing_queue);
 		WARNING_LOG("Failed to allocate the queue.\n");
 		return err;
 	}
@@ -96,8 +96,8 @@ int kocket_init(ClientKocket kocket) {
 	if (pthread_create(&kocket_thread, NULL, kocket_dispatcher, (void*) &kocket) != 0) {
 		close(kocket.socket);
 		mutex_destroy(&kocket_status_lock);
-		kocket_deallocate_queue(&kocket_writing_queue, FALSE);
-		kocket_deallocate_queue(&kocket_reads_queue, TRUE);
+		kocket_deallocate_queue(&kocket_writing_queue);
+		kocket_deallocate_queue(&kocket_reads_queue);
 		WARNING_LOG("Failed to create the pthread.\n");
 		return -KOCKET_IO_ERROR;
 	}
@@ -116,9 +116,11 @@ int kocket_deinit(KocketStatus status) {
 		WARNING_LOG("The kocket_thread failed during execution.\n");
 	}
 
-	if ((err = kocket_deallocate_queue(&kocket_writing_queue, FALSE)) < 0) {
+	if ((err = kocket_deallocate_queue(&kocket_writing_queue)) < 0) {
 		WARNING_LOG("An error occurred while deallocating the queue.\n");
-	} else if ((err = kocket_deallocate_queue(&kocket_reads_queue, TRUE)) < 0) {
+	}
+	
+	if ((err = kocket_deallocate_queue(&kocket_reads_queue)) < 0) {
 		WARNING_LOG("An error occurred while deallocating the queue.\n");
 	}
 	
@@ -172,6 +174,8 @@ static int kocket_send(ClientKocket kocket, KocketStruct kocket_struct) {
 		return -KOCKET_IO_ERROR;
 	}
 	
+	WARNING_LOG("Sending %u bytes of payload to the server.\n", payload_size);
+
 	mem_cpy(payload, &kocket_struct, sizeof(KocketStruct) - sizeof(u8*));
 	mem_cpy(KOCKET_CAST_PTR(payload, u8) + sizeof(KocketStruct) - sizeof(u8*), kocket_struct.payload, kocket_struct.payload_size);
 
@@ -196,6 +200,8 @@ static int kocket_recv(ClientKocket kocket) {
 		return -KOCKET_IO_ERROR;
 	}
 
+	WARNING_LOG("Receiving %u bytes from the server.\n", kocket_struct.payload_size);
+
 	kocket_struct.payload = (u8*) kocket_calloc(kocket_struct.payload_size, sizeof(u8));
 	if (kocket_struct.payload == NULL) {
 		WARNING_LOG("An error occurred while allocating the buffer for the payload.\n");
@@ -214,13 +220,17 @@ static int kocket_recv(ClientKocket kocket) {
 			WARNING_LOG("An error occurred while executing the handler for the type: '%s'\n", (kocket.kocket_types)[kocket_struct.type_id].type_name);
 			return ret;
 		}
+		WARNING_LOG("Handled kocket with type_id: %u\n", kocket_struct.type_id);
+		return KOCKET_NO_ERROR;
 	} 
 
-	if ((ret = kocket_enqueue(&kocket_writing_queue, kocket_struct, 0)) < 0) {
+	if ((ret = kocket_enqueue(&kocket_reads_queue, kocket_struct, 0)) < 0) {
 		WARNING_LOG("Failed to enqueue the given kocket_struct.\n");
 		return ret;
 	}
 	
+	WARNING_LOG("Kocket with type id %u appended to the queue.\n", kocket_struct.type_id);
+
 	return KOCKET_NO_ERROR;
 }
 

@@ -147,7 +147,17 @@ static s32 __init example_init(void) {
 	log_msg.type_id = KOCKET_LOG_TYPE;
 	const char log_payload[] = "Here is some data.\n";
 	log_msg.payload_size = KOCKET_ARR_SIZE(log_payload);
-	log_msg.payload = (u8*) log_payload;
+	log_msg.payload = (u8*) kocket_calloc(log_msg.payload_size, sizeof(u8));
+	if (log_msg.payload == NULL) {
+		int ret = 0;
+		if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
+			ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-ret]);
+			return ret;
+		}
+		WARNING_LOG("Failed to allocate buffer for payload.\n");
+		return -1;
+	}
+	mem_cpy(log_msg.payload, log_payload, log_msg.payload_size);
 	
 	if ((err = kocket_write(0, &log_msg)) < 0) {
 		int ret = 0;
@@ -163,8 +173,18 @@ static s32 __init example_init(void) {
 	log_sec_msg.type_id = KOCKET_LOG_TYPE;
 	const char log_sec_payload[] = "Here is some data again.\n";
 	log_sec_msg.payload_size = KOCKET_ARR_SIZE(log_sec_payload);
-	log_sec_msg.payload = (u8*) log_sec_payload;
-	
+	log_sec_msg.payload = (u8*) kocket_calloc(log_sec_msg.payload_size, sizeof(u8));
+	if (log_sec_msg.payload == NULL) {
+		int ret = 0;
+		if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
+			ERROR_LOG("An error occurred while de-initializing the kocket.\n", kocket_status_str[-ret]);
+			return ret;
+		}
+		WARNING_LOG("Failed to allocate buffer for payload.\n");
+		return -1;
+	}
+	mem_cpy(log_sec_msg.payload, log_sec_payload, log_sec_msg.payload_size);
+
 	if ((err = kocket_write(0, &log_msg)) < 0) {
 		int ret = 0;
 		if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
