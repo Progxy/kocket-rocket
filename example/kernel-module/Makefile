@@ -1,11 +1,11 @@
-obj-m += example.o
-example-y += example_entry.o 
+obj-m += kocket.o
+kocket-y += kocket_entry.o 
 
 kernel_example: 
 	make -C /lib/modules/$(shell uname -r)/build/ M=$(PWD) EXTRA_AFLAGS="-D_DEBUG" modules
 
-disassemble: example.ko
-	objdump -dS example.ko > example_d.S
+disassemble: kocket.ko
+	objdump -dS kocket.ko > kocket_d.S
 
 clean: 
 	make -C /lib/modules/$(shell uname -r)/build/ M=$(PWD) clean

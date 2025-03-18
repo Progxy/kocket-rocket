@@ -139,9 +139,9 @@ u8* cha_cha20(u8 random_data[64]) {
 
 	int is_supported_rdseed = is_rdseed_supported();
     int is_supported_rdrand = is_rdrand_supported();
-    if (!is_supported_rdrand) {
-        WARNING_LOG("CHACHA20: RDRAND is UNSUPPORTED.\n");
-        if (!is_supported_rdseed) WARNING_LOG("CHACHA20: RDSEED is UNSUPPORTED.\n");
+	if (!is_supported_rdrand) {
+        WARNING_LOG("CHACHA20: RDRAND is UNSUPPORTED.");
+        if (!is_supported_rdseed) WARNING_LOG("CHACHA20: RDSEED is UNSUPPORTED.");
         kocket_srand();
 		u32 rand_value = kocket_rand();
 		mem_cpy(random_data, &rand_value, sizeof(u32));
@@ -149,7 +149,7 @@ u8* cha_cha20(u8 random_data[64]) {
 		mem_cpy(random_data + sizeof(u32), &rand_value, sizeof(u32));
 		return random_data;
     } else if (!is_supported_rdseed) {
-		DEBUG_LOG("CHACHA20: RDSEED is UNSUPPORTED.\n");
+		DEBUG_LOG("CHACHA20: RDSEED is UNSUPPORTED.");
 	}
 
 	for (u8 i = 0; i < 64; ++i) {
