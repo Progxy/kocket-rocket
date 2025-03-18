@@ -308,7 +308,6 @@ int kocket_deallocate_queue(KocketQueue* kocket_queue) {
 
 	kocket_mutex_lock(&(kocket_queue -> lock), DEFAULT_LOCK_TIMEOUT_SEC);
 	
-	DEBUG_LOG("kocket_queue -> size: %u", kocket_queue -> size);
 	(*kocket_queue -> free_elements)(kocket_queue);
 	kocket_queue -> size = 0;
 	
@@ -325,14 +324,14 @@ int kocket_enqueue(KocketQueue* kocket_queue, void* kocket_entry) {
 
 	kocket_mutex_lock(&(kocket_queue -> lock), DEFAULT_LOCK_TIMEOUT_SEC);
 	
-	kocket_queue -> elements = kocket_realloc(kocket_queue -> elements, kocket_queue -> elements_size * (++(kocket_queue -> size)));
+	kocket_queue -> elements = (void**) kocket_realloc(kocket_queue -> elements, kocket_queue -> elements_size * (++(kocket_queue -> size)));
 	if (kocket_queue -> elements == NULL) {
 		kocket_mutex_unlock(&(kocket_queue -> lock));
 		WARNING_LOG("Failed to reallocate the elements.");
 		return -KOCKET_IO_ERROR;
 	}
 	
-	mem_cpy((kocket_queue -> elements)[kocket_queue -> size - 1], kocket_entry, kocket_queue -> elements_size);
+	mem_cpy(KOCKET_CAST_PTR(kocket_queue -> elements, u8) + kocket_queue -> elements_size * (kocket_queue -> size - 1), kocket_entry, kocket_queue -> elements_size);
 		
 	kocket_mutex_unlock(&(kocket_queue -> lock));
 
@@ -347,9 +346,9 @@ int kocket_dequeue(KocketQueue* kocket_queue, void* kocket_entry) {
 
 	kocket_mutex_lock(&(kocket_queue -> lock), DEFAULT_LOCK_TIMEOUT_SEC);
 	
-   	mem_cpy(kocket_entry, (kocket_queue -> elements)[kocket_queue -> size - 1], kocket_queue -> elements_size);
+   	mem_cpy(kocket_entry, KOCKET_CAST_PTR(kocket_queue -> elements, u8) + kocket_queue -> elements_size  * (kocket_queue -> size - 1), kocket_queue -> elements_size);
 	
-	kocket_queue -> elements = kocket_realloc(kocket_queue -> elements, kocket_queue -> elements_size * (--(kocket_queue -> size)));
+	kocket_queue -> elements = (void**) kocket_realloc(kocket_queue -> elements, kocket_queue -> elements_size * (--(kocket_queue -> size)));
 	if (kocket_queue -> elements == NULL) {
 		kocket_mutex_unlock(&(kocket_queue -> lock));
 		WARNING_LOG("Failed to reallocate the elements.");

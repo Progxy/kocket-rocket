@@ -280,7 +280,6 @@ static KocketStatus thread_should_stop(void) {
 	KocketStatus status = TRUE;
 	kocket_mutex_lock(&kocket_status_lock, DEFAULT_LOCK_TIMEOUT_SEC); 
     status = kocket_status; 
-	DEBUG_LOG("kocket_status: %u - '%s'", kocket_status, kocket_status_str[kocket_status]);
 	kocket_mutex_unlock(&kocket_status_lock);
 	return status;
 }
@@ -318,9 +317,7 @@ void* kocket_dispatcher(void* kocket_arg) {
 	
 	int err = 0;
 	while (!thread_should_stop()) {
-		DEBUG_LOG("revents: 0x%X", kocket.poll_fd.revents);
 		int ret = poll(&(kocket.poll_fd), 1, KOCKET_TIMEOUT_MS);
-		DEBUG_LOG("revents: 0x%X", kocket.poll_fd.revents);
 		if (ret < 0) {
 			PERROR_LOG("Failed to perform the read/accept poll");
 			err = -KOCKET_IO_ERROR;

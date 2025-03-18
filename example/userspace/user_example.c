@@ -93,7 +93,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	KocketPacketEntry packet_info_request_response = {0};
-	if ((err = kocket_read(info_request.req_id, &packet_info_request_response, FALSE)) < 0) {
+	if ((err = kocket_read(info_request.req_id, &packet_info_request_response, TRUE)) < 0) {
 		ERROR_LOG("An error occurred while reading from the kocket.", kocket_status_str[-err]);
 		int ret = 0;
 		if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
