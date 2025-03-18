@@ -21,8 +21,8 @@ typedef u8 bool;
 typedef enum InfoRequestTypes { LOG_BUFFER_SIZE, IS_LOG_BUFFER_EMPTY } InfoRequestTypes;
 typedef enum ClientKocketTypes { KOCKET_LOG_TYPE = 0, KOCKET_INFO_REQUEST } ClientKocketTypes;
 
-int log_handler(KocketPacket kocket_struct) {
-	DEBUG_LOG("SERVER_INFO: '%s'", kocket_struct.payload);
+int log_handler(KocketPacketEntry packet_entry) {
+	DEBUG_LOG("SERVER_INFO: '%s'", packet_entry.kocket_packet.payload);
 	return KOCKET_NO_ERROR;
 }
 
@@ -81,7 +81,8 @@ int main(int argc, char* argv[]) {
 	
 	mem_cpy(info_request.payload, LOG_BUFFER_SIZE, sizeof(InfoRequestTypes));
 	
-	if ((err = kocket_write(&info_request)) < 0) {
+	KocketPacketEntry packet_info_request = { .kocket_packet = info_request };
+	if ((err = kocket_write(&packet_info_request)) < 0) {
 		ERROR_LOG("An error occurred while writing to the kocket.", kocket_status_str[-err]);
 		int ret = 0;
 		if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
@@ -91,8 +92,8 @@ int main(int argc, char* argv[]) {
 		return err;
 	}
 
-	KocketPacket info_request_response = {0};
-	if ((err = kocket_read(info_request.req_id, &info_request_response, FALSE)) < 0) {
+	KocketPacketEntry packet_info_request_response = {0};
+	if ((err = kocket_read(info_request.req_id, &packet_info_request_response, FALSE)) < 0) {
 		ERROR_LOG("An error occurred while reading from the kocket.", kocket_status_str[-err]);
 		int ret = 0;
 		if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
@@ -101,7 +102,8 @@ int main(int argc, char* argv[]) {
 		}
 		return err;
 	}
-
+	
+	KocketPacket info_request_response = packet_info_request_response.kocket_packet;
 	if (info_request_response.payload_size != sizeof(u32)) {
 		KOCKET_SAFE_FREE(info_request_response.payload);
 		WARNING_LOG("Payload size doesn't match: found %u, but expected: %lu.", info_request_response.payload_size, sizeof(u32));

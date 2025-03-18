@@ -34,16 +34,16 @@ typedef enum ClientKocketTypes { KOCKET_LOG_TYPE = 0, KOCKET_INFO_REQUEST } Clie
 // ------------------------
 //  Functions Declarations
 // ------------------------
-// TODO: Remove the \n from all the places where it could be printed to kernel ring buffer
-int info_request_handler(u32 kocket_client_id, KocketPacket kocket_packet);
+int info_request_handler(KocketPacketEntry entry_packet);
 
 /* -------------------------------------------------------------------------------------------------------- */
-int info_request_handler(u32 kocket_client_id, KocketPacket kocket_packet) {
+int info_request_handler(KocketPacketEntry entry_packet) {
+	KocketPacket kocket_packet = entry_packet.kocket_packet;
+	
 	KocketPacket info_req_res = {0};
 	info_req_res.type_id = KOCKET_INFO_REQUEST;
 	info_req_res.payload_size = sizeof(InfoRequestTypes);
 	info_req_res.payload = (u8*) kocket_calloc(sizeof(InfoRequestTypes), sizeof(u8));
-	
 	if (info_req_res.payload == NULL) {
 		int ret = 0;
 		if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
@@ -56,11 +56,12 @@ int info_request_handler(u32 kocket_client_id, KocketPacket kocket_packet) {
 	
 	int err = 0;
 	InfoRequestTypes info_req = *KOCKET_CAST_PTR(kocket_packet.payload, InfoRequestTypes);
+	KocketPacketEntry packet_info_req_res = { .kocket_client_id = entry_packet.kocket_client_id, .kocket_packet = info_req_res };
 	if (info_req == LOG_BUFFER_SIZE) {
 		int val = 512;
 		mem_cpy(info_req_res.payload, &val, sizeof(InfoRequestTypes));
 		
-		if ((err = kocket_write(kocket_client_id, &info_req_res)) < 0) {
+		if ((err = kocket_write(&packet_info_req_res)) < 0) {
 			KOCKET_SAFE_FREE(info_req_res.payload);
 			int ret = 0;
 			if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
@@ -78,7 +79,7 @@ int info_request_handler(u32 kocket_client_id, KocketPacket kocket_packet) {
 		int val = 0;
 		mem_cpy(info_req_res.payload, &val, sizeof(InfoRequestTypes));
 		
-		if ((err = kocket_write(kocket_client_id, &info_req_res)) < 0) {
+		if ((err = kocket_write(&packet_info_req_res)) < 0) {
 			KOCKET_SAFE_FREE(info_req_res.payload);
 			int ret = 0;
 			if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
@@ -97,7 +98,7 @@ int info_request_handler(u32 kocket_client_id, KocketPacket kocket_packet) {
 	int val = -1;
 	mem_cpy(info_req_res.payload, &val, sizeof(InfoRequestTypes));
 	
-	if ((err = kocket_write(kocket_client_id, &info_req_res)) < 0) {
+	if ((err = kocket_write(&packet_info_req_res)) < 0) {
 		KOCKET_SAFE_FREE(info_req_res.payload);
 		int ret = 0;
 		if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
@@ -159,7 +160,8 @@ static s32 __init example_init(void) {
 	}
 	mem_cpy(log_msg.payload, log_payload, log_msg.payload_size);
 	
-	if ((err = kocket_write(0, &log_msg)) < 0) {
+	KocketPacketEntry packet_log_msg = { .kocket_packet = log_msg, .kocket_client_id = 0 };
+	if ((err = kocket_write(&packet_log_msg)) < 0) {
 		int ret = 0;
 		if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
 			ERROR_LOG("An error occurred while de-initializing the kocket.", kocket_status_str[-ret]);
@@ -185,7 +187,8 @@ static s32 __init example_init(void) {
 	}
 	mem_cpy(log_sec_msg.payload, log_sec_payload, log_sec_msg.payload_size);
 
-	if ((err = kocket_write(0, &log_msg)) < 0) {
+	KocketPacketEntry packet_log_sec_msg = { .kocket_packet = log_sec_msg, .kocket_client_id = 0 };
+	if ((err = kocket_write(&packet_log_sec_msg)) < 0) {
 		int ret = 0;
 		if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
 			ERROR_LOG("An error occurred while de-initializing the kocket.", kocket_status_str[-ret]);
