@@ -175,7 +175,6 @@ static s32 __init example_init(void) {
 	log_sec_msg.type_id = KOCKET_LOG_TYPE;
 	const char log_sec_payload[] = "Here is some data again.\n";
 	log_sec_msg.payload_size = KOCKET_ARR_SIZE(log_sec_payload);
-	DEBUG_LOG("Sending payload_size: %u", log_sec_msg.payload_size);
 	log_sec_msg.payload = (u8*) kocket_calloc(log_sec_msg.payload_size, sizeof(u8));
 	if (log_sec_msg.payload == NULL) {
 		int ret = 0;

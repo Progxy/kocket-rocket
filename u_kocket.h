@@ -163,8 +163,6 @@ int kocket_write(KocketPacketEntry* kocket_packet) {
 		return err;
 	}
 
-	DEBUG_LOG("Appended to queue the following req_id: %lu", kocket_packet -> kocket_packet.req_id);
-
 	return KOCKET_NO_ERROR;
 }
 
@@ -324,6 +322,7 @@ void* kocket_dispatcher(void* kocket_arg) {
 			break;
 		} else if (ret == 0) continue;
 		
+		DEBUG_LOG("poll: 0x%X - 0x%X, 0x%X", kocket.poll_fd.revents & POLLIN, kocket.poll_fd.revents & POLLOUT, kocket.poll_fd.revents);
 
 		if ((kocket.poll_fd.revents & POLLIN) && (ret = kocket_recv(kocket)) < 0) {
 			WARNING_LOG("An error occurred while receiving.");

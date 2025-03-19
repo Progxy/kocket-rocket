@@ -182,6 +182,7 @@ static void kocket_deinit_thread(ServerKocket* kocket, KocketStatus status) {
 	// Close all the clients connections
 	// TODO: Probably should be better to introduce a default kocket_type,
 	// to close the connection on both ends instead of closing only from this side
+	DEBUG_LOG("Releasing sockets.");
 	for (u32 i = 0; i < kocket -> clients_cnt; ++i) sock_release((kocket -> clients)[i]);
 	
 	KOCKET_SAFE_FREE(kocket -> clients);
@@ -347,6 +348,7 @@ static int kocket_release_client(ServerKocket* kocket, u32 index) {
 		return -KOCKET_INVALID_PARAMETERS;
 	}
 	
+	DEBUG_LOG("Releasing socket %u", index);
 	sock_release((kocket -> clients)[index]);
 	
 	mem_move(kocket -> poll_sockets + index, kocket -> poll_sockets + index + 1, sizeof(PollSocket) * (kocket -> clients_cnt - index - 1));

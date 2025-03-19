@@ -256,7 +256,6 @@ typedef struct ClientKocket {
 // Constant Values
 #define DEFAULT_LOCK_TIMEOUT_SEC 60
 #define KOCKET_TIMEOUT_MS 1000 // NOTE: This value should be changed based on the requirement of the operational environment.
-#define KOCKET_PORT       6969
 
 /* -------------------------------------------------------------------------------------------------------- */
 // Static Shared Variables

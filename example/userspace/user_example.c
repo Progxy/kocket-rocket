@@ -16,10 +16,15 @@ typedef u8 bool;
 #define _KOCKET_UTILS_IMPLEMENTATION_
 #include "../../u_kocket.h"
 
+/* -------------------------------------------------------------------------------------------------------- */
+// -----------------
+//  Macros and Enums
+// -----------------
 #define HOST_PORT 6969
 
 typedef enum InfoRequestTypes { LOG_BUFFER_SIZE, IS_LOG_BUFFER_EMPTY } InfoRequestTypes;
 typedef enum ClientKocketTypes { KOCKET_LOG_TYPE = 0, KOCKET_INFO_REQUEST } ClientKocketTypes;
+/* -------------------------------------------------------------------------------------------------------- */
 
 int log_handler(KocketPacketEntry packet_entry) {
 	DEBUG_LOG("SERVER_INFO: '%s'", packet_entry.kocket_packet.payload);
