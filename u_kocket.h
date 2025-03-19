@@ -104,12 +104,26 @@ int kocket_init(ClientKocket kocket) {
 		return err;
 	}
 
-	if (pthread_create(&kocket_thread, NULL, kocket_dispatcher, (void*) &kocket) != 0) {
+	ClientKocket* client_kocket = (ClientKocket*) kocket_calloc(1, sizeof(ClientKocket));
+	if (client_kocket == NULL) {
 		close(kocket.socket);
 		kocket_mutex_destroy(&kocket_status_lock);
 		kocket_deallocate_queue(&kocket_writing_queue);
 		kocket_deallocate_queue(&kocket_reads_queue);
 		kocket_deallocate_queue(&kocket_wait_queue);
+		WARNING_LOG("Failed to allocate the client kocket.");
+		return -KOCKET_IO_ERROR;
+	}
+
+	mem_cpy(client_kocket, &kocket, sizeof(ClientKocket));
+
+	if (pthread_create(&kocket_thread, NULL, kocket_dispatcher, client_kocket) != 0) {
+		close(kocket.socket);
+		kocket_mutex_destroy(&kocket_status_lock);
+		kocket_deallocate_queue(&kocket_writing_queue);
+		kocket_deallocate_queue(&kocket_reads_queue);
+		kocket_deallocate_queue(&kocket_wait_queue);
+		KOCKET_SAFE_FREE(client_kocket);
 		WARNING_LOG("Failed to create the pthread.");
 		return -KOCKET_IO_ERROR;
 	}
@@ -310,9 +324,9 @@ static int kocket_poll_write(ClientKocket* kocket) {
 
 // This will be the function executed by the kocket-thread.
 void* kocket_dispatcher(void* kocket_arg) {
-	ClientKocket kocket = {0};
-	mem_cpy(&kocket, (ClientKocket*) kocket_arg, sizeof(ClientKocket));
-	
+	ClientKocket kocket = *KOCKET_CAST_PTR(kocket_arg, ClientKocket);
+	KOCKET_SAFE_FREE(kocket_arg);
+
 	int err = 0;
 	while (!thread_should_stop()) {
 		int ret = poll(&(kocket.poll_fd), 1, KOCKET_TIMEOUT_MS);
@@ -322,8 +336,6 @@ void* kocket_dispatcher(void* kocket_arg) {
 			break;
 		} else if (ret == 0) continue;
 		
-		DEBUG_LOG("poll: 0x%X - 0x%X, 0x%X", kocket.poll_fd.revents & POLLIN, kocket.poll_fd.revents & POLLOUT, kocket.poll_fd.revents);
-
 		if ((kocket.poll_fd.revents & POLLIN) && (ret = kocket_recv(kocket)) < 0) {
 			WARNING_LOG("An error occurred while receiving.");
 			err = ret;

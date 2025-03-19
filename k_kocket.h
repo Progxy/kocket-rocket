@@ -395,7 +395,10 @@ static int kocket_poll(PollSocket* poll_sockets, u32 sks_cnt, u32 timeout) {
 		
 		if (!skb_queue_empty(&(sk -> sk_receive_queue))) poll_sockets[i].reg_events |= POLLIN | POLLRDNORM;
 		if (sock_writeable(sk)) poll_sockets[i].reg_events |= POLLOUT | POLLWRNORM;
-		if (sk -> sk_err || !skb_queue_empty(&(sk -> sk_error_queue))) poll_sockets[i].reg_events |= POLLERR;
+		if (sk -> sk_err || !skb_queue_empty(&(sk -> sk_error_queue))) {
+			WARNING_LOG("PollERR: sk -> sk_err: %u, sk_error_queue non empty: %u", sk -> sk_err, !skb_queue_empty(&(sk -> sk_error_queue)));
+			poll_sockets[i].reg_events |= POLLERR;
+		}
 		if (sk -> sk_shutdown & RCV_SHUTDOWN) poll_sockets[i].reg_events |= POLLHUP;
 		mask |= poll_sockets[i].reg_events;
 	}
@@ -439,6 +442,7 @@ static int kocket_poll_read_accept(ServerKocket* kocket) {
 	int err = 0;
 	for (unsigned int i = 1; i < kocket -> clients_cnt + 1; ++i) {
 		if (((kocket -> poll_sockets)[i].reg_events & POLLERR) || (((kocket -> poll_sockets)[i].reg_events & POLLIN) && (err = kocket_recv(*kocket, i - 1) < 0))) {
+			WARNING_LOG("Failed to receive data or POLLERR: %u, '%s'",((kocket -> poll_sockets)[i].reg_events & POLLERR), kocket_status_str[-err]);
 			if ((err = kocket_release_client(kocket, i - 1)) < 0) { 
 				WARNING_LOG("Failed to release the client %u.", i);
 				return err;
