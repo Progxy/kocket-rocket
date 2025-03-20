@@ -280,6 +280,7 @@ int wake_waiting_entry(KocketQueue* kocket_queue, u64 req_id);
 int kocket_addr_to_bytes(const char* str_addr, u32* bytes_addr);
 
 /* -------------------------------------------------------------------------------------------------------- */
+// TODO: The following is not a queue but rather a stack, hence why the last message added to the "queue" is the first to be sent to the client/server
 int kocket_alloc_queue(KocketQueue* kocket_queue, u8 elements_size, FreeElementsHandler free_elements_handler) {
 	if (kocket_queue == NULL) {
 		WARNING_LOG("Invalid kocket_queue, the given kocket_queue is NULL.");

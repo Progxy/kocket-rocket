@@ -267,7 +267,7 @@ static int kocket_recv(ClientKocket kocket) {
 			WARNING_LOG("An error occurred while executing the handler for the type: '%s'", (kocket.kocket_types)[kocket_packet.type_id].type_name);
 			return ret;
 		}
-		WARNING_LOG("Handled kocket with type_id: %u", kocket_packet.type_id);
+		DEBUG_LOG("Handled kocket with type_id: %u", kocket_packet.type_id);
 		return KOCKET_NO_ERROR;
 	} 
 
@@ -298,6 +298,7 @@ static KocketStatus thread_should_stop(void) {
 
 static int kocket_poll_write(ClientKocket* kocket) {
 	int err = 0;
+	DEBUG_LOG("kocket -> poll_fd.revents & POLLOUT: %d", kocket -> poll_fd.revents & POLLOUT);
 	if ((kocket -> poll_fd.revents & POLLOUT) == 0) return KOCKET_NO_ERROR;
 	else if ((err = is_kocket_queue_empty(&kocket_writing_queue)) < 0) {
 		WARNING_LOG("An error occurred while checking if the kocket_writing_queue was empty.");
