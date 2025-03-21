@@ -39,72 +39,33 @@ int info_request_handler(KocketPacketEntry entry_packet);
 /* -------------------------------------------------------------------------------------------------------- */
 int info_request_handler(KocketPacketEntry entry_packet) {
 	KocketPacket kocket_packet = entry_packet.kocket_packet;
-	
+	InfoRequestTypes info_req = *KOCKET_CAST_PTR(kocket_packet.payload, InfoRequestTypes);
+
 	KocketPacket info_req_res = {0};
+	info_req_res.req_id = kocket_packet.req_id;
 	info_req_res.type_id = KOCKET_INFO_REQUEST;
 	info_req_res.payload_size = sizeof(InfoRequestTypes);
-	info_req_res.payload = (u8*) kocket_calloc(sizeof(InfoRequestTypes), sizeof(u8));
+	info_req_res.payload = (u8*) kocket_calloc(1, sizeof(InfoRequestTypes));
 	if (info_req_res.payload == NULL) {
-		int ret = 0;
-		if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
-			ERROR_LOG("An error occurred while de-initializing the kocket.", kocket_status_str[-ret]);
-			return ret;
-		}
 		WARNING_LOG("Failed to allocate the payload.");
 		return -1;
 	}
 	
 	int err = 0;
-	InfoRequestTypes info_req = *KOCKET_CAST_PTR(kocket_packet.payload, InfoRequestTypes);
 	KocketPacketEntry packet_info_req_res = { .kocket_client_id = entry_packet.kocket_client_id, .kocket_packet = info_req_res };
 	if (info_req == LOG_BUFFER_SIZE) {
-		int val = 512;
+		InfoRequestTypes val = 512;
 		mem_cpy(info_req_res.payload, &val, sizeof(InfoRequestTypes));
-		
-		if ((err = kocket_write(&packet_info_req_res)) < 0) {
-			KOCKET_SAFE_FREE(info_req_res.payload);
-			int ret = 0;
-			if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
-				ERROR_LOG("An error occurred while de-initializing the kocket.", kocket_status_str[-ret]);
-				return ret;
-			}
-			ERROR_LOG("An error occurred while writing to the kocket.", kocket_status_str[-err]);
-			return err;
-		}
-
-		KOCKET_SAFE_FREE(info_req_res.payload);
-		
-		return KOCKET_NO_ERROR;
 	} else if (info_req == IS_LOG_BUFFER_EMPTY) {
-		int val = 0;
+		InfoRequestTypes val = 0;
 		mem_cpy(info_req_res.payload, &val, sizeof(InfoRequestTypes));
-		
-		if ((err = kocket_write(&packet_info_req_res)) < 0) {
-			KOCKET_SAFE_FREE(info_req_res.payload);
-			int ret = 0;
-			if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
-				ERROR_LOG("An error occurred while de-initializing the kocket.", kocket_status_str[-ret]);
-				return ret;
-			}
-			ERROR_LOG("An error occurred while writing to the kocket.", kocket_status_str[-err]);
-			return err;
-		}
-
-		KOCKET_SAFE_FREE(info_req_res.payload);
-		
-		return KOCKET_NO_ERROR;
+	} else {
+		InfoRequestTypes val = -1;
+		mem_cpy(info_req_res.payload, &val, sizeof(InfoRequestTypes));
 	}
-	
-	int val = -1;
-	mem_cpy(info_req_res.payload, &val, sizeof(InfoRequestTypes));
-	
-	if ((err = kocket_write(&packet_info_req_res)) < 0) {
-		KOCKET_SAFE_FREE(info_req_res.payload);
-		int ret = 0;
-		if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
-			ERROR_LOG("An error occurred while de-initializing the kocket.", kocket_status_str[-ret]);
-			return ret;
-		}
+
+	if ((err = kocket_write(&packet_info_req_res, FALSE)) < 0) {
+		/* KOCKET_SAFE_FREE(packet_info_req_res.kocket_packet.payload); */
 		ERROR_LOG("An error occurred while writing to the kocket.", kocket_status_str[-err]);
 		return err;
 	}
@@ -161,7 +122,8 @@ static s32 __init example_init(void) {
 	mem_cpy(log_msg.payload, log_payload, log_msg.payload_size);
 	
 	KocketPacketEntry packet_log_msg = { .kocket_packet = log_msg, .kocket_client_id = 0 };
-	if ((err = kocket_write(&packet_log_msg)) < 0) {
+	if ((err = kocket_write(&packet_log_msg, TRUE)) < 0) {
+		KOCKET_SAFE_FREE(packet_log_msg.kocket_packet.payload);
 		int ret = 0;
 		if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
 			ERROR_LOG("An error occurred while de-initializing the kocket.", kocket_status_str[-ret]);
@@ -188,7 +150,8 @@ static s32 __init example_init(void) {
 	mem_cpy(log_sec_msg.payload, log_sec_payload, log_sec_msg.payload_size);
 
 	KocketPacketEntry packet_log_sec_msg = { .kocket_packet = log_sec_msg, .kocket_client_id = 0 };
-	if ((err = kocket_write(&packet_log_sec_msg)) < 0) {
+	if ((err = kocket_write(&packet_log_sec_msg, TRUE)) < 0) {
+		KOCKET_SAFE_FREE(packet_log_sec_msg.kocket_packet.payload);
 		int ret = 0;
 		if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
 			ERROR_LOG("An error occurred while de-initializing the kocket.", kocket_status_str[-ret]);

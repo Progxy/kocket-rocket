@@ -21,18 +21,25 @@
 #include "common_kocket.h"
 #include "./crypto/chacha20.h"
 
-// Macro
+/* -------------------------------------------------------------------------------------------------------- */
+// -------
+//  Macro
+// -------
 #define check_kocket_status thread_should_stop
 
+/* -------------------------------------------------------------------------------------------------------- */
+// ------------------
 // Static Variables
+// ------------------
 static pthread_t kocket_thread = 0;
 
+/* -------------------------------------------------------------------------------------------------------- */
 // ------------------------
 //  Functions Declarations
 // ------------------------
 int kocket_init(ClientKocket kocket);
 int kocket_deinit(KocketStatus status);
-int kocket_write(KocketPacketEntry* kocket_packet);
+int kocket_write(KocketPacketEntry* kocket_packet, bool update_req_id);
 int kocket_read(u64 req_id, KocketPacketEntry* kocket_packet, bool wait_response);
 static int kocket_send(ClientKocket kocket, KocketPacket kocket_packet);
 static int kocket_recv(ClientKocket kocket);
@@ -67,7 +74,7 @@ int kocket_init(ClientKocket kocket) {
     }
 
 	kocket.poll_fd.fd = kocket.socket;
-	kocket.poll_fd.events = POLLIN;
+	kocket.poll_fd.events = POLLIN | POLLOUT;
 
 	kocket_mutex_init(&kocket_status_lock);
 	
@@ -164,13 +171,15 @@ int kocket_deinit(KocketStatus status) {
 	return err;
 }
 
-int kocket_write(KocketPacketEntry* kocket_packet) {
+int kocket_write(KocketPacketEntry* kocket_packet, bool update_req_id) {
 	KocketStatus status = KOCKET_NO_ERROR;
 	if ((status = check_kocket_status()) < 0) return status;
 	
-	u8 initialization_vector[64] = {0};
-	kocket_packet -> kocket_packet.req_id = *KOCKET_CAST_PTR(cha_cha20(initialization_vector), u64);
-	
+	if (update_req_id) {
+		u8 initialization_vector[64] = {0};
+		kocket_packet -> kocket_packet.req_id = *KOCKET_CAST_PTR(cha_cha20(initialization_vector), u64);
+	}
+
 	int err = 0;
 	if ((err = kocket_enqueue(&kocket_writing_queue, kocket_packet)) < 0) {
 		WARNING_LOG("Failed to enqueue the given kocket_packet.");
@@ -201,6 +210,11 @@ int kocket_read(u64 req_id, KocketPacketEntry* kocket_packet, bool wait_response
 		
 		kocket_mutex_unlock(&(wait_entry.lock));
 
+		if ((ret = kocket_dequeue_wait(&kocket_wait_queue, req_id)) < 0) {
+			WARNING_LOG("An error occurred while dequeuing the wait with req_id: %lu", req_id);
+			return ret;
+		}
+			
 		if (ret == KOCKET_REQ_NOT_FOUND) {
 			WARNING_LOG("Something must be wrong as even after waiting the data was still not there, req_id: %lu", req_id);
 			return -ret;
@@ -276,6 +290,11 @@ static int kocket_recv(ClientKocket kocket) {
 		return ret;
 	}
 	
+	if ((ret = wake_waiting_entry(&kocket_wait_queue, kocket_packet.req_id))) {
+		WARNING_LOG("Failed to wake entry waiting for req_id: %lu.", kocket_packet.req_id);
+		return ret;
+	}
+	
 	DEBUG_LOG("Kocket with type id %u appended to the queue.", kocket_packet.type_id);
 
 	return KOCKET_NO_ERROR;
@@ -298,7 +317,6 @@ static KocketStatus thread_should_stop(void) {
 
 static int kocket_poll_write(ClientKocket* kocket) {
 	int err = 0;
-	DEBUG_LOG("kocket -> poll_fd.revents & POLLOUT: %d", kocket -> poll_fd.revents & POLLOUT);
 	if ((kocket -> poll_fd.revents & POLLOUT) == 0) return KOCKET_NO_ERROR;
 	else if ((err = is_kocket_queue_empty(&kocket_writing_queue)) < 0) {
 		WARNING_LOG("An error occurred while checking if the kocket_writing_queue was empty.");

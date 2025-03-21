@@ -87,7 +87,7 @@ int main(int argc, char* argv[]) {
 	mem_cpy(info_request.payload, LOG_BUFFER_SIZE, sizeof(InfoRequestTypes));
 	
 	KocketPacketEntry packet_info_request = { .kocket_packet = info_request };
-	if ((err = kocket_write(&packet_info_request)) < 0) {
+	if ((err = kocket_write(&packet_info_request, TRUE)) < 0) {
 		ERROR_LOG("An error occurred while writing to the kocket.", kocket_status_str[-err]);
 		int ret = 0;
 		if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {
@@ -98,7 +98,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	KocketPacketEntry packet_info_request_response = {0};
-	if ((err = kocket_read(info_request.req_id, &packet_info_request_response, TRUE)) < 0) {
+	if ((err = kocket_read(packet_info_request.kocket_packet.req_id, &packet_info_request_response, TRUE)) < 0) {
 		ERROR_LOG("An error occurred while reading from the kocket.", kocket_status_str[-err]);
 		int ret = 0;
 		if ((ret = kocket_deinit(-KOCKET_IO_ERROR)) < 0) {

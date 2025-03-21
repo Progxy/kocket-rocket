@@ -70,9 +70,9 @@
 	#define PERROR_LOG(format, ...)           printf(COLOR_STR("WARNING:" __FILE__ ":%u: ", WARNING_COLOR) format ", because: " COLOR_STR("'%s'", BRIGHT_YELLOW) ".\n", __LINE__, ##__VA_ARGS__, str_error())
 	#define DEBUG_LOG(format, ...)            printf(COLOR_STR("DEBUG:" __FILE__ ":%u: ", DEBUG_COLOR) format "\n", __LINE__, ##__VA_ARGS__)
 #else 
-	#define ERROR_LOG(fmt, error_str, ...) printk(KERN_ERR "ERROR:%s:(" __FILE__ ":%d): " fmt "\n", error_str, __LINE__,  ##__VA_ARGS__)
+	#define ERROR_LOG(fmt, error_str, ...) printk(KERN_ERR "ERROR:%s:(" __FILE__ ":%u): " fmt "\n", error_str, __LINE__,  ##__VA_ARGS__)
 	#define PERROR_LOG(fmt, err, ...) 	   printk(KERN_WARNING "WARNING:" __FILE__ ":%u: " fmt ", because: " COLOR_STR("'%s'", BRIGHT_YELLOW) ".\n", __LINE__, ##__VA_ARGS__, str_error(err))
-	#define WARNING_LOG(fmt, ...)          printk(KERN_WARNING "WARNING(" __FILE__ ":%d): " fmt "\n", __LINE__,  ##__VA_ARGS__)
+	#define WARNING_LOG(fmt, ...)          printk(KERN_WARNING "WARNING:" __FILE__ ":%u: " fmt "\n", __LINE__,  ##__VA_ARGS__)
 	#define DEBUG_LOG(fmt, ...)            printk(KERN_INFO "DEBUG: " fmt "\n", ##__VA_ARGS__)
 #endif //_U_KOCKET_H_
 
@@ -122,6 +122,7 @@ typedef enum KocketStatus {
 	KOCKET_INVALID_PARAMETERS,
 	INVALID_KOCKET_CLIENT_ID,
 	KOCKET_FAILED_LOCK,
+	KOCKET_NO_DATA_RECEIVED,
 	KOCKET_TODO 
 } KocketStatus;
 
@@ -135,6 +136,7 @@ static const char* kocket_status_str[] = {
 	"KOCKET_INVALID_PARAMETERS",
 	"INVALID_KOCKET_CLIENT_ID",
 	"KOCKET_FAILED_LOCK",
+	"KOCKET_NO_DATA_RECEIVED",
 	"KOCKET_TODO"
 };
 
@@ -276,6 +278,7 @@ int kocket_enqueue(KocketQueue* kocket_queue, void* kocket_entry);
 int kocket_dequeue(KocketQueue* kocket_queue, void* kocket_entry);
 int kocket_dequeue_packet(KocketQueue* kocket_packets_queue, u64 req_id, KocketPacketEntry* kocket_packet, KocketQueue* kocket_waits_queue, KocketWaitEntry* kocket_wait_entry);
 int is_kocket_queue_empty(KocketQueue* kocket_queue) ;
+int kocket_dequeue_wait(KocketQueue* kocket_waits_queue, u64 req_id);
 int wake_waiting_entry(KocketQueue* kocket_queue, u64 req_id);
 int kocket_addr_to_bytes(const char* str_addr, u32* bytes_addr);
 
@@ -349,7 +352,7 @@ int kocket_dequeue(KocketQueue* kocket_queue, void* kocket_entry) {
    	mem_cpy(kocket_entry, KOCKET_CAST_PTR(kocket_queue -> elements, u8) + kocket_queue -> elements_size  * (kocket_queue -> size - 1), kocket_queue -> elements_size);
 	
 	kocket_queue -> elements = (void**) kocket_realloc(kocket_queue -> elements, kocket_queue -> elements_size * (--(kocket_queue -> size)));
-	if (kocket_queue -> elements == NULL) {
+	if (kocket_queue -> elements == NULL && kocket_queue -> size > 0) {
 		kocket_mutex_unlock(&(kocket_queue -> lock));
 		WARNING_LOG("Failed to reallocate the elements.");
 		return -KOCKET_IO_ERROR;
@@ -393,7 +396,7 @@ int kocket_dequeue_packet(KocketQueue* kocket_packets_queue, u64 req_id, KocketP
 		kocket_mutex_unlock(&(kocket_packets_queue -> lock));
 		if (kocket_waits_queue != NULL && kocket_wait_entry != NULL) {
 			mem_set(kocket_wait_entry, 0, sizeof(KocketWaitEntry));
-			kocket_wait_entry -> req_id = kocket_packet -> kocket_packet.req_id;
+			kocket_wait_entry -> req_id = req_id;
 			kocket_mutex_init(&(kocket_wait_entry -> lock));
 			
 			int ret = 0;
@@ -411,10 +414,10 @@ int kocket_dequeue_packet(KocketQueue* kocket_packets_queue, u64 req_id, KocketP
 	
 	*kocket_packet = kocket_packet_entries[index];
 	
-	mem_move(KOCKET_CAST_PTR(kocket_packets_queue -> elements, KocketPacketEntry) + index, KOCKET_CAST_PTR(kocket_packets_queue -> elements, KocketPacketEntry) + index + 1, (kocket_packets_queue -> size - 1 - index) * sizeof(KocketPacket));
+	mem_move(KOCKET_CAST_PTR(kocket_packets_queue -> elements, KocketPacketEntry) + index, KOCKET_CAST_PTR(kocket_packets_queue -> elements, KocketPacketEntry) + index + 1, (kocket_packets_queue -> size - 1 - index) * sizeof(KocketPacketEntry));
 
-	kocket_packets_queue -> elements = kocket_realloc(kocket_packets_queue -> elements, sizeof(KocketPacket) * (--(kocket_packets_queue -> size)));
-	if (kocket_packets_queue -> elements == NULL) {
+	kocket_packets_queue -> elements = kocket_realloc(kocket_packets_queue -> elements, sizeof(KocketPacketEntry) * (--(kocket_packets_queue -> size)));
+	if (kocket_packets_queue -> elements == NULL && kocket_packets_queue -> size > 0) {
 		kocket_mutex_unlock(&(kocket_packets_queue -> lock));
 		WARNING_LOG("Failed to reallocate the elements.");
 		return -KOCKET_IO_ERROR;
@@ -449,6 +452,34 @@ int kocket_queue_get_n_client_id(KocketQueue* kocket_queue, u32 index, u32* kock
 }
 #endif //_K_KOCKET_H_
 
+int kocket_dequeue_wait(KocketQueue* kocket_waits_queue, u64 req_id) {
+	if (kocket_waits_queue == NULL) {
+		WARNING_LOG("Invalid kocket_waits_queue, the given kocket_waits_queue is NULL.");
+		return -KOCKET_IO_ERROR;
+	}
+
+	kocket_mutex_lock(&(kocket_waits_queue -> lock), DEFAULT_LOCK_TIMEOUT_SEC);
+	
+	u32 index = 0;
+	KocketWaitEntry* kocket_wait_entries = KOCKET_CAST_PTR(kocket_waits_queue -> elements, KocketWaitEntry);
+	for (index = 0; index < kocket_waits_queue -> size; ++index) {
+		if (kocket_wait_entries[index].req_id == req_id) break;
+	}
+	
+	mem_move(KOCKET_CAST_PTR(kocket_waits_queue -> elements, KocketWaitEntry) + index, KOCKET_CAST_PTR(kocket_waits_queue -> elements, KocketWaitEntry) + index + 1, (kocket_waits_queue -> size - 1 - index) * sizeof(KocketWaitEntry));
+
+	kocket_waits_queue -> elements = kocket_realloc(kocket_waits_queue -> elements, sizeof(KocketWaitEntry) * (--(kocket_waits_queue -> size)));
+	if (kocket_waits_queue -> elements == NULL && kocket_waits_queue -> size > 0) {
+		kocket_mutex_unlock(&(kocket_waits_queue -> lock));
+		WARNING_LOG("Failed to reallocate the elements.");
+		return -KOCKET_IO_ERROR;
+	}
+
+	kocket_mutex_unlock(&(kocket_waits_queue -> lock));
+
+	return KOCKET_NO_ERROR;
+}
+
 int wake_waiting_entry(KocketQueue* kocket_queue, u64 req_id) {
 	if (kocket_queue == NULL) {
 		WARNING_LOG("Invalid kocket_queue, the given kocket_queue is NULL.");
@@ -462,6 +493,7 @@ int wake_waiting_entry(KocketQueue* kocket_queue, u64 req_id) {
 	for (index = 0; index < kocket_queue -> size; ++index) {
 		if (kocket_wait_entries[index].req_id == req_id) {
 			kocket_mutex_unlock(&(kocket_wait_entries[index].lock));
+			DEBUG_LOG("unlock_mutex: %u", index);
 			break;
 		}
 	}
