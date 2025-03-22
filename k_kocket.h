@@ -22,6 +22,7 @@
 #include "./crypto/chacha20.h"
 #include <linux/sched.h>
 #include <linux/signal.h>
+#include <linux/jiffies.h>
 
 // ------------------
 //  Static Variables
@@ -39,7 +40,6 @@ int kocket_write(KocketPacketEntry* packet_entry, bool update_req_id);
 int kocket_read(u64 req_id, KocketPacketEntry* kocket_packet, bool wait_response);
 static inline KocketStatus check_kocket_status(void);
 static int kocket_recv(ServerKocket kocket, u32 kocket_client_id);
-static int kocket_poll_read_accept(ServerKocket* kocket);
 int kocket_dispatcher(void* kocket_arg);
 void wait_queue_free_elements(KocketQueue* kocket_queue);
 void packet_queue_free_elements(KocketQueue* kocket_queue);
@@ -303,8 +303,6 @@ static int kocket_send(ServerKocket kocket, KocketPacketEntry packet_entry) {
 		return -KOCKET_IO_ERROR;
 	}
 	
-	DEBUG_LOG("Sent %u bytes to client %u, payload: %p", payload_size, packet_entry.kocket_client_id, payload);
-
 	KOCKET_SAFE_FREE(payload);
 
 	return KOCKET_NO_ERROR;
@@ -354,8 +352,6 @@ static int kocket_recv(ServerKocket kocket, u32 kocket_client_id) {
 		PERROR_LOG("An error occurred while reading from the client", err);
 		return -KOCKET_IO_ERROR;
 	}
-	
-	DEBUG_LOG("Received %u bytes from client %u", kocket_packet.payload_size, kocket_client_id);
 	
 	int ret = 0;
 	KocketPacketEntry packet_entry = { .kocket_packet = kocket_packet, .kocket_client_id = kocket_client_id };
@@ -420,29 +416,43 @@ static int kocket_poll(PollSocket* poll_sockets, u32 sks_cnt, u32 timeout) {
 	int mask = 0;
 	for (u32 i = 0; i < sks_cnt; ++i) {
 		struct sock* sk = poll_sockets[i].socket -> sk;
-		wait_event_interruptible_timeout(sk -> sk_wq -> wait,
-			!skb_queue_empty(&(sk -> sk_receive_queue)) ||
-			sock_writeable(sk)                          ||
-			sk -> sk_err                                ||
-			!skb_queue_empty(&(sk -> sk_error_queue))   ||
-			(sk -> sk_shutdown & RCV_SHUTDOWN),
-			timeout / sks_cnt
-		);
+		lock_sock(sk);
 		
 		if (sk -> sk_state == TCP_LISTEN) {
 			poll_sockets[i].reg_events = inet_csk_listen_poll(sk);
+			release_sock(sk);
 			mask |= poll_sockets[i].reg_events;
 			continue;
 		}
-		
+
+		int ret = 0;
+		if ((ret = wait_event_interruptible_timeout(sk -> sk_wq -> wait, 
+			!skb_queue_empty(&(sk -> sk_receive_queue)) || sock_writeable(sk) || sk -> sk_err || !skb_queue_empty(&(sk -> sk_error_queue)) || (sk -> sk_shutdown & RCV_SHUTDOWN), 
+			jiffies + timeout)) == 0) {
+			release_sock(sk);
+		   	continue;
+		}
+
+		// Check for error or connection closed
+		if (sk -> sk_err || !skb_queue_empty(&(sk -> sk_error_queue))) {
+			WARNING_LOG("POLLERR: %u", sk -> sk_err);
+			release_sock(sk);
+			poll_sockets[i].reg_events = POLLERR;
+			mask |= poll_sockets[i].reg_events;
+			continue;
+		} else if (sk -> sk_shutdown & RCV_SHUTDOWN) {
+			release_sock(sk);
+			DEBUG_LOG("Connection closed by client %u", i);
+			poll_sockets[i].reg_events = POLLHUP;
+			mask |= poll_sockets[i].reg_events;
+			continue;
+		}
+
 		if (!skb_queue_empty(&(sk -> sk_receive_queue))) poll_sockets[i].reg_events |= POLLIN | POLLRDNORM;
 		if (sock_writeable(sk)) poll_sockets[i].reg_events |= POLLOUT | POLLWRNORM;
-		if (sk -> sk_err || !skb_queue_empty(&(sk -> sk_error_queue))) {
-			WARNING_LOG("POLLERR: sk -> sk_err: %u, sk_error_queue non empty: %u", sk -> sk_err, !skb_queue_empty(&(sk -> sk_error_queue)));
-			poll_sockets[i].reg_events |= POLLERR;
-		}
-		if (sk -> sk_shutdown & RCV_SHUTDOWN) poll_sockets[i].reg_events |= POLLHUP;
 		
+		release_sock(sk);
+
 		mask |= poll_sockets[i].reg_events;
 	}
 
@@ -484,14 +494,12 @@ static int kocket_poll_read_accept(ServerKocket* kocket) {
 	
 	int err = 0;
 	for (unsigned int i = 1; i < kocket -> clients_cnt + 1; ++i) {
-		if (((kocket -> poll_sockets)[i].reg_events & POLLHUP) || ((kocket -> poll_sockets)[i].reg_events & POLLERR)) {
+		if (((kocket -> poll_sockets)[i].reg_events & POLLERR) || ((kocket -> poll_sockets)[i].reg_events & POLLHUP)) {
 			if ((err = kocket_release_client(kocket, i - 1)) < 0) { 
 				WARNING_LOG("Failed to release the client %u.", i);
 				return err;
 			}
-		} 
-
-		if (((kocket -> poll_sockets)[i].reg_events & POLLIN) && (err = kocket_recv(*kocket, i - 1) < 0)) {
+		} else if (((kocket -> poll_sockets)[i].reg_events & POLLIN) && ((err = kocket_recv(*kocket, i - 1)) < 0)) {
 			WARNING_LOG("Failed to receive data: '%s'", kocket_status_str[err < 0 ? -err : err]);
 			if ((err = kocket_release_client(kocket, i - 1)) < 0) { 
 				WARNING_LOG("Failed to release the client %u.", i);
@@ -549,16 +557,16 @@ int kocket_dispatcher(void* kocket_arg) {
 	
 	allow_signal(SIGKILL | SIGTERM);
 
+	int ret = 0;
 	int err = KOCKET_NO_ERROR;
 	while (!kthread_should_stop()) {
-		int ret = 0;
-		if ((ret = kocket_poll(kocket.poll_sockets, kocket.clients_cnt + 1, KOCKET_TIMEOUT_MS * (kocket.clients_cnt + 1))) == 0) continue;
+		if ((ret = kocket_poll(kocket.poll_sockets, kocket.clients_cnt + 1, KOCKET_TIMEOUT_SEC)) == 0) continue;
 		else if (ret < 0) {
 			WARNING_LOG("An error occurred while polling.");
 			err = ret;
 			break;
 		}
-		
+
 		if ((ret = kocket_poll_read_accept(&kocket)) < 0) {
 			WARNING_LOG("An error occurred while polling read/accept.");
 			err = ret;

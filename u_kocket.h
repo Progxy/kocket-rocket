@@ -245,18 +245,23 @@ static int kocket_send(ClientKocket kocket, KocketPacket kocket_packet) {
 		return -KOCKET_IO_ERROR;
 	}
 	
-	DEBUG_LOG("Sent %u bytes to server.", payload_size);	
-
 	KOCKET_SAFE_FREE(payload);
 
 	return KOCKET_NO_ERROR;
 }
 
 static int kocket_recv(ClientKocket kocket) {
+	int err = 0;
 	KocketPacket kocket_packet = {0};
-
-	if (recv(kocket.socket, &kocket_packet, sizeof(KocketPacket) - sizeof(u8*), 0) < (ssize_t) (sizeof(KocketPacket) - sizeof(u8*))) {
-		PERROR_LOG("An error occurred while reading from the client.");
+	if ((err = recv(kocket.socket, &kocket_packet, sizeof(KocketPacket) - sizeof(u8*), 0)) < (long long int) (sizeof(KocketPacket) - sizeof(u8*))) {
+		if (err > 0) {
+			WARNING_LOG("Expected %u bytes but received %d", kocket_packet.payload_size, err);
+			return -KOCKET_NO_DATA_RECEIVED;
+		} else if (err == 0) {
+			WARNING_LOG("The connection to the server has been closed");
+			return -KOCKET_CLOSED_CONNECTION;
+		}
+		PERROR_LOG("An error occurred while reading from the client");
 		return -KOCKET_IO_ERROR;
 	}
 
@@ -268,8 +273,15 @@ static int kocket_recv(ClientKocket kocket) {
 		return -KOCKET_IO_ERROR;
 	}
 	
-	if (recv(kocket.socket, kocket_packet.payload, kocket_packet.payload_size, 0) < kocket_packet.payload_size) {
+	if ((err = recv(kocket.socket, kocket_packet.payload, kocket_packet.payload_size, 0)) < (long int) kocket_packet.payload_size) {
 		KOCKET_SAFE_FREE(kocket_packet.payload);
+		if (err > 0) {
+			WARNING_LOG("Expected %u bytes but received %d", kocket_packet.payload_size, err);
+			return -KOCKET_NO_DATA_RECEIVED;
+		} else if (err == 0) {
+			WARNING_LOG("The connection to the server has been closed");
+			return -KOCKET_CLOSED_CONNECTION;
+		}
 		PERROR_LOG("An error occurred while reading from the server.");
 		return -KOCKET_IO_ERROR;
 	}
@@ -290,12 +302,12 @@ static int kocket_recv(ClientKocket kocket) {
 		return ret;
 	}
 	
+	DEBUG_LOG("Kocket with type id %u appended to the queue.", kocket_packet.type_id);
+	
 	if ((ret = wake_waiting_entry(&kocket_wait_queue, kocket_packet.req_id))) {
 		WARNING_LOG("Failed to wake entry waiting for req_id: %lu.", kocket_packet.req_id);
 		return ret;
 	}
-	
-	DEBUG_LOG("Kocket with type id %u appended to the queue.", kocket_packet.type_id);
 
 	return KOCKET_NO_ERROR;
 }
@@ -370,6 +382,10 @@ void* kocket_dispatcher(void* kocket_arg) {
 	
 	close(kocket.socket);
 
+	kocket_mutex_lock(&kocket_status_lock, DEFAULT_LOCK_TIMEOUT_SEC); 
+    kocket_status = err; 
+	kocket_mutex_unlock(&kocket_status_lock);
+	
 	DEBUG_LOG("Closed socket and thread.");
 
 	return (void*)(intptr_t) err;
@@ -390,4 +406,5 @@ void packet_queue_free_elements(KocketQueue* kocket_queue) {
 }
 
 #endif //_U_KOCKET_H_
+
 

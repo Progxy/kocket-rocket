@@ -223,7 +223,7 @@ typedef struct KocketType {
 
 #ifdef _K_KOCKET_H_
 typedef struct PollSocket {
-	u32 reg_events;
+	volatile u32 reg_events;
 	struct socket* socket;
 } PollSocket;
 
@@ -258,8 +258,10 @@ typedef struct ClientKocket {
 
 /* -------------------------------------------------------------------------------------------------------- */
 // Constant Values
+// NOTE: Those values should be changed based on the requirement of the operational environment.
 #define DEFAULT_LOCK_TIMEOUT_SEC 60
-#define KOCKET_TIMEOUT_MS 1000 // NOTE: This value should be changed based on the requirement of the operational environment.
+#define KOCKET_TIMEOUT_SEC       1 
+#define KOCKET_TIMEOUT_MS        1000 
 
 /* -------------------------------------------------------------------------------------------------------- */
 // Static Shared Variables
@@ -286,6 +288,7 @@ int wake_waiting_entry(KocketQueue* kocket_queue, u64 req_id);
 int kocket_addr_to_bytes(const char* str_addr, u32* bytes_addr);
 
 /* -------------------------------------------------------------------------------------------------------- */
+// TODO: Must refactor the code and maybe add some comments
 // TODO: The following is not a queue but rather a stack, hence why the last message added to the "queue" is the first to be sent to the client/server
 int kocket_alloc_queue(KocketQueue* kocket_queue, u8 elements_size, FreeElementsHandler free_elements_handler) {
 	if (kocket_queue == NULL) {
