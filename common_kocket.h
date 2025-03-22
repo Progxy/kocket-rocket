@@ -123,6 +123,7 @@ typedef enum KocketStatus {
 	INVALID_KOCKET_CLIENT_ID,
 	KOCKET_FAILED_LOCK,
 	KOCKET_NO_DATA_RECEIVED,
+	KOCKET_CLOSED_CONNECTION,
 	KOCKET_TODO 
 } KocketStatus;
 
@@ -137,6 +138,7 @@ static const char* kocket_status_str[] = {
 	"INVALID_KOCKET_CLIENT_ID",
 	"KOCKET_FAILED_LOCK",
 	"KOCKET_NO_DATA_RECEIVED",
+	"KOCKET_CLOSED_CONNECTION",
 	"KOCKET_TODO"
 };
 
@@ -276,7 +278,8 @@ int kocket_alloc_queue(KocketQueue* kocket_queue, u8 elements_size, FreeElements
 int kocket_deallocate_queue(KocketQueue* kocket_queue);
 int kocket_enqueue(KocketQueue* kocket_queue, void* kocket_entry);
 int kocket_dequeue(KocketQueue* kocket_queue, void* kocket_entry);
-int kocket_dequeue_packet(KocketQueue* kocket_packets_queue, u64 req_id, KocketPacketEntry* kocket_packet, KocketQueue* kocket_waits_queue, KocketWaitEntry* kocket_wait_entry);
+int kocket_get_last_ref(KocketQueue* kocket_queue, void** kocket_entry);
+int kocket_dequeue_packet(KocketQueue* kocket_packets_queue, u64 req_id, KocketPacketEntry* kocket_packet, KocketQueue* kocket_waits_queue, KocketWaitEntry** kocket_wait_entry);
 int is_kocket_queue_empty(KocketQueue* kocket_queue) ;
 int kocket_dequeue_wait(KocketQueue* kocket_waits_queue, u64 req_id);
 int wake_waiting_entry(KocketQueue* kocket_queue, u64 req_id);
@@ -363,6 +366,21 @@ int kocket_dequeue(KocketQueue* kocket_queue, void* kocket_entry) {
 	return KOCKET_NO_ERROR;
 }
 
+int kocket_get_last_ref(KocketQueue* kocket_queue, void** kocket_entry) {
+	if (kocket_queue == NULL) {
+		WARNING_LOG("Invalid kocket_queue, the given kocket_queue is NULL.");
+		return -KOCKET_IO_ERROR;
+	}
+
+	kocket_mutex_lock(&(kocket_queue -> lock), DEFAULT_LOCK_TIMEOUT_SEC);
+	
+	*kocket_entry = KOCKET_CAST_PTR(kocket_queue -> elements, u8) + kocket_queue -> elements_size * (kocket_queue -> size - 1); 
+	
+	kocket_mutex_unlock(&(kocket_queue -> lock));
+	
+	return KOCKET_NO_ERROR;
+}
+
 int is_kocket_queue_empty(KocketQueue* kocket_queue) {	
 	if (kocket_queue == NULL) {
 		WARNING_LOG("Invalid kocket_queue, the given kocket_queue is NULL.");
@@ -378,7 +396,7 @@ int is_kocket_queue_empty(KocketQueue* kocket_queue) {
 	return queue_size;
 }
 
-int kocket_dequeue_packet(KocketQueue* kocket_packets_queue, u64 req_id, KocketPacketEntry* kocket_packet, KocketQueue* kocket_waits_queue, KocketWaitEntry* kocket_wait_entry) {
+int kocket_dequeue_packet(KocketQueue* kocket_packets_queue, u64 req_id, KocketPacketEntry* kocket_packet, KocketQueue* kocket_waits_queue, KocketWaitEntry** kocket_wait_entry) {
 	if (kocket_packets_queue == NULL) {
 		WARNING_LOG("Invalid kocket_packets_queue, the given kocket_packets_queue is NULL.");
 		return -KOCKET_IO_ERROR;
@@ -395,17 +413,22 @@ int kocket_dequeue_packet(KocketQueue* kocket_packets_queue, u64 req_id, KocketP
 	if (index >= kocket_packets_queue -> size) {
 		kocket_mutex_unlock(&(kocket_packets_queue -> lock));
 		if (kocket_waits_queue != NULL && kocket_wait_entry != NULL) {
-			mem_set(kocket_wait_entry, 0, sizeof(KocketWaitEntry));
-			kocket_wait_entry -> req_id = req_id;
-			kocket_mutex_init(&(kocket_wait_entry -> lock));
+			KocketWaitEntry wait_entry = {0};
+			wait_entry.req_id = req_id;
 			
 			int ret = 0;
-			if ((ret = kocket_enqueue(kocket_waits_queue, kocket_wait_entry)) < 0) {
+			if ((ret = kocket_enqueue(kocket_waits_queue, &wait_entry)) < 0) {
 				WARNING_LOG("An error occurred while enqueuing the wait_lock.");
 				return ret;
 			}
 			
-			kocket_mutex_lock(&(kocket_wait_entry -> lock), DEFAULT_LOCK_TIMEOUT_SEC);
+			if ((ret = kocket_get_last_ref(kocket_waits_queue, (void**) kocket_wait_entry)) < 0) {
+				WARNING_LOG("An error occurred while getting the last element of the queue.");
+				return ret;
+			}
+			
+			kocket_mutex_init(&((*kocket_wait_entry) -> lock));
+			kocket_mutex_lock(&((*kocket_wait_entry) -> lock), DEFAULT_LOCK_TIMEOUT_SEC);
 		
 		}
 		
@@ -463,7 +486,10 @@ int kocket_dequeue_wait(KocketQueue* kocket_waits_queue, u64 req_id) {
 	u32 index = 0;
 	KocketWaitEntry* kocket_wait_entries = KOCKET_CAST_PTR(kocket_waits_queue -> elements, KocketWaitEntry);
 	for (index = 0; index < kocket_waits_queue -> size; ++index) {
-		if (kocket_wait_entries[index].req_id == req_id) break;
+		if (kocket_wait_entries[index].req_id == req_id) {
+			kocket_mutex_unlock(&(kocket_wait_entries[index].lock));
+			break;
+		}
 	}
 	
 	mem_move(KOCKET_CAST_PTR(kocket_waits_queue -> elements, KocketWaitEntry) + index, KOCKET_CAST_PTR(kocket_waits_queue -> elements, KocketWaitEntry) + index + 1, (kocket_waits_queue -> size - 1 - index) * sizeof(KocketWaitEntry));
@@ -493,7 +519,6 @@ int wake_waiting_entry(KocketQueue* kocket_queue, u64 req_id) {
 	for (index = 0; index < kocket_queue -> size; ++index) {
 		if (kocket_wait_entries[index].req_id == req_id) {
 			kocket_mutex_unlock(&(kocket_wait_entries[index].lock));
-			DEBUG_LOG("unlock_mutex: %u", index);
 			break;
 		}
 	}

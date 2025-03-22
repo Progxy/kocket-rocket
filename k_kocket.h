@@ -243,21 +243,21 @@ int kocket_read(u64 req_id, KocketPacketEntry* kocket_packet, bool wait_response
 	if ((status = check_kocket_status()) < 0) return status;
 	
 	int ret = 0;
-	KocketWaitEntry wait_entry = {0};
+	KocketWaitEntry* wait_entry = NULL;
 	if ((ret = kocket_dequeue_packet(&kocket_reads_queue, req_id, kocket_packet, wait_response ? &kocket_wait_queue : NULL, wait_response ? &wait_entry : NULL)) < 0) {
 		WARNING_LOG("An error occurred while finding withing the queue.");
 		return ret;
 	}
 	
 	if (ret == KOCKET_REQ_NOT_FOUND && wait_response) {
-		kocket_mutex_lock(&(wait_entry.lock), DEFAULT_LOCK_TIMEOUT_SEC);
+		kocket_mutex_lock(&(wait_entry -> lock), DEFAULT_LOCK_TIMEOUT_SEC);
 		
 		if ((ret = kocket_dequeue_packet(&kocket_reads_queue, req_id, kocket_packet, NULL, NULL)) < 0) {
 			WARNING_LOG("An error occurred while finding withing the queue.");
 			return ret;
 		}
 		
-		kocket_mutex_unlock(&(wait_entry.lock));
+		kocket_mutex_unlock(&(wait_entry -> lock));
 
 		if ((ret = kocket_dequeue_wait(&kocket_wait_queue, req_id)) < 0) {
 			WARNING_LOG("An error occurred while dequeuing the wait with req_id: %llu", req_id);
@@ -321,9 +321,12 @@ static int kocket_recv(ServerKocket kocket, u32 kocket_client_id) {
 	KocketPacket kocket_packet = {0};
 	struct kvec vec = { .iov_len = sizeof(KocketPacket) - sizeof(u8*), .iov_base = &kocket_packet };
 	if ((err = kernel_recvmsg((kocket.clients)[kocket_client_id], &msg_hdr, &vec, sizeof(KocketPacket) - sizeof(u8*), sizeof(KocketPacket) - sizeof(u8*), 0)) < (sizeof(KocketPacket) - sizeof(u8*))) {
-		if (err >= 0) {
-			WARNING_LOG("Expected %lu bytes but received %d", (sizeof(KocketPacket) - sizeof(u8*)), err);
+		if (err > 0) {
+			WARNING_LOG("Expected %u bytes but received %d", kocket_packet.payload_size, err);
 			return -KOCKET_NO_DATA_RECEIVED;
+		} else if (err == 0) {
+			WARNING_LOG("The connection to client %u has been closed", kocket_client_id);
+			return -KOCKET_CLOSED_CONNECTION;
 		}
 		PERROR_LOG("An error occurred while reading from the client", err);
 		return -KOCKET_IO_ERROR;
@@ -341,9 +344,12 @@ static int kocket_recv(ServerKocket kocket, u32 kocket_client_id) {
 	struct kvec payload_vec = (struct kvec) { .iov_len = kocket_packet.payload_size, .iov_base = kocket_packet.payload };
 	if ((err = kernel_recvmsg((kocket.clients)[kocket_client_id], &payload_msg_hdr, &payload_vec, kocket_packet.payload_size, kocket_packet.payload_size, 0)) < kocket_packet.payload_size) {
 		KOCKET_SAFE_FREE(kocket_packet.payload);
-		if (err >= 0) {
+		if (err > 0) {
 			WARNING_LOG("Expected %u bytes but received %d", kocket_packet.payload_size, err);
 			return -KOCKET_NO_DATA_RECEIVED;
+		} else if (err == 0) {
+			WARNING_LOG("The connection to client %u has been closed", kocket_client_id);
+			return -KOCKET_CLOSED_CONNECTION;
 		}
 		PERROR_LOG("An error occurred while reading from the client", err);
 		return -KOCKET_IO_ERROR;
@@ -432,10 +438,11 @@ static int kocket_poll(PollSocket* poll_sockets, u32 sks_cnt, u32 timeout) {
 		if (!skb_queue_empty(&(sk -> sk_receive_queue))) poll_sockets[i].reg_events |= POLLIN | POLLRDNORM;
 		if (sock_writeable(sk)) poll_sockets[i].reg_events |= POLLOUT | POLLWRNORM;
 		if (sk -> sk_err || !skb_queue_empty(&(sk -> sk_error_queue))) {
-			WARNING_LOG("PollERR: sk -> sk_err: %u, sk_error_queue non empty: %u", sk -> sk_err, !skb_queue_empty(&(sk -> sk_error_queue)));
+			WARNING_LOG("POLLERR: sk -> sk_err: %u, sk_error_queue non empty: %u", sk -> sk_err, !skb_queue_empty(&(sk -> sk_error_queue)));
 			poll_sockets[i].reg_events |= POLLERR;
 		}
 		if (sk -> sk_shutdown & RCV_SHUTDOWN) poll_sockets[i].reg_events |= POLLHUP;
+		
 		mask |= poll_sockets[i].reg_events;
 	}
 
@@ -477,8 +484,15 @@ static int kocket_poll_read_accept(ServerKocket* kocket) {
 	
 	int err = 0;
 	for (unsigned int i = 1; i < kocket -> clients_cnt + 1; ++i) {
-		if (((kocket -> poll_sockets)[i].reg_events & POLLERR) || (((kocket -> poll_sockets)[i].reg_events & POLLIN) && (err = kocket_recv(*kocket, i - 1) < 0))) {
-			WARNING_LOG("Failed to receive data or POLLERR: %u, '%s'",((kocket -> poll_sockets)[i].reg_events & POLLERR), kocket_status_str[-err]);
+		if (((kocket -> poll_sockets)[i].reg_events & POLLHUP) || ((kocket -> poll_sockets)[i].reg_events & POLLERR)) {
+			if ((err = kocket_release_client(kocket, i - 1)) < 0) { 
+				WARNING_LOG("Failed to release the client %u.", i);
+				return err;
+			}
+		} 
+
+		if (((kocket -> poll_sockets)[i].reg_events & POLLIN) && (err = kocket_recv(*kocket, i - 1) < 0)) {
+			WARNING_LOG("Failed to receive data: '%s'", kocket_status_str[err < 0 ? -err : err]);
 			if ((err = kocket_release_client(kocket, i - 1)) < 0) { 
 				WARNING_LOG("Failed to release the client %u.", i);
 				return err;
@@ -519,13 +533,10 @@ static int kocket_poll_write(ServerKocket* kocket) {
 			return err;
 		}
 
-		DEBUG_LOG("kocket_queue_size: %u, i: %u --", kocket_queue_size, i);
 		KOCKET_SAFE_FREE(packet_entry.kocket_packet.payload);
-		DEBUG_LOG("kocket_queue_size: %u, i: %u ----", kocket_queue_size, i);
 
 		kocket_queue_size--;
 		(kocket -> poll_sockets)[kocket_client_id + 1].reg_events = 0;
-		DEBUG_LOG("kocket_queue_size: %u, i: %u", kocket_queue_size, i);
 	}
 
 	return KOCKET_NO_ERROR;

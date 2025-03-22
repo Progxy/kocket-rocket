@@ -194,21 +194,21 @@ int kocket_read(u64 req_id, KocketPacketEntry* kocket_packet, bool wait_response
 	if ((status = check_kocket_status()) < 0) return status;
 	
 	int ret = 0;
-	KocketWaitEntry wait_entry = {0};
+	KocketWaitEntry* wait_entry = NULL;
 	if ((ret = kocket_dequeue_packet(&kocket_reads_queue, req_id, kocket_packet, wait_response ? &kocket_wait_queue : NULL, wait_response ? &wait_entry : NULL)) < 0) {
 		WARNING_LOG("An error occurred while finding withing the queue.");
 		return ret;
 	}
 	
 	if (ret == KOCKET_REQ_NOT_FOUND && wait_response) {
-		kocket_mutex_lock(&(wait_entry.lock), DEFAULT_LOCK_TIMEOUT_SEC);
+		kocket_mutex_lock(&(wait_entry -> lock), DEFAULT_LOCK_TIMEOUT_SEC);
 		
 		if ((ret = kocket_dequeue_packet(&kocket_reads_queue, req_id, kocket_packet, NULL, NULL)) < 0) {
 			WARNING_LOG("An error occurred while finding withing the queue.");
 			return ret;
 		}
 		
-		kocket_mutex_unlock(&(wait_entry.lock));
+		kocket_mutex_unlock(&(wait_entry -> lock));
 
 		if ((ret = kocket_dequeue_wait(&kocket_wait_queue, req_id)) < 0) {
 			WARNING_LOG("An error occurred while dequeuing the wait with req_id: %lu", req_id);
