@@ -65,12 +65,10 @@ int info_request_handler(KocketPacketEntry entry_packet) {
 	}
 
 	if ((err = kocket_write(&packet_info_req_res, FALSE)) < 0) {
-		/* KOCKET_SAFE_FREE(packet_info_req_res.kocket_packet.payload); */
+		KOCKET_SAFE_FREE(packet_info_req_res.kocket_packet.payload);
 		ERROR_LOG("An error occurred while writing to the kocket.", kocket_status_str[-err]);
 		return err;
 	}
-
-	KOCKET_SAFE_FREE(info_req_res.payload);
 
 	return KOCKET_NO_ERROR;
 }
