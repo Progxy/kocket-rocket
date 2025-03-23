@@ -289,7 +289,6 @@ int kocket_addr_to_bytes(const char* str_addr, u32* bytes_addr);
 
 /* -------------------------------------------------------------------------------------------------------- */
 // TODO: Must refactor the code and maybe add some comments
-// TODO: The following is not a queue but rather a stack, hence why the last message added to the "queue" is the first to be sent to the client/server
 int kocket_alloc_queue(KocketQueue* kocket_queue, u8 elements_size, FreeElementsHandler free_elements_handler) {
 	if (kocket_queue == NULL) {
 		WARNING_LOG("Invalid kocket_queue, the given kocket_queue is NULL.");
@@ -355,8 +354,9 @@ int kocket_dequeue(KocketQueue* kocket_queue, void* kocket_entry) {
 
 	kocket_mutex_lock(&(kocket_queue -> lock), DEFAULT_LOCK_TIMEOUT_SEC);
 	
-   	mem_cpy(kocket_entry, KOCKET_CAST_PTR(kocket_queue -> elements, u8) + kocket_queue -> elements_size  * (kocket_queue -> size - 1), kocket_queue -> elements_size);
-	
+	mem_cpy(kocket_entry, KOCKET_CAST_PTR(kocket_queue -> elements, u8), kocket_queue -> elements_size);
+	mem_move(KOCKET_CAST_PTR(kocket_queue -> elements, u8), KOCKET_CAST_PTR(kocket_queue -> elements, u8) + kocket_queue -> elements_size, kocket_queue -> elements_size * (kocket_queue -> size - 1));
+
 	kocket_queue -> elements = (void**) kocket_realloc(kocket_queue -> elements, kocket_queue -> elements_size * (--(kocket_queue -> size)));
 	if (kocket_queue -> elements == NULL && kocket_queue -> size > 0) {
 		kocket_mutex_unlock(&(kocket_queue -> lock));
@@ -490,7 +490,7 @@ int kocket_dequeue_wait(KocketQueue* kocket_waits_queue, u64 req_id) {
 	KocketWaitEntry* kocket_wait_entries = KOCKET_CAST_PTR(kocket_waits_queue -> elements, KocketWaitEntry);
 	for (index = 0; index < kocket_waits_queue -> size; ++index) {
 		if (kocket_wait_entries[index].req_id == req_id) {
-			kocket_mutex_unlock(&(kocket_wait_entries[index].lock));
+			kocket_mutex_destroy(&(kocket_wait_entries[index].lock));
 			break;
 		}
 	}

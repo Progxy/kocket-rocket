@@ -74,7 +74,7 @@ int kocket_init(ClientKocket kocket) {
     }
 
 	kocket.poll_fd.fd = kocket.socket;
-	kocket.poll_fd.events = POLLIN | POLLOUT;
+	kocket.poll_fd.events = POLLIN | POLLOUT | POLLHUP;
 
 	kocket_mutex_init(&kocket_status_lock);
 	
@@ -359,7 +359,7 @@ void* kocket_dispatcher(void* kocket_arg) {
 	KOCKET_SAFE_FREE(kocket_arg);
 
 	int err = 0;
-	while (!thread_should_stop()) {
+	while (!thread_should_stop() && !err) {
 		int ret = poll(&(kocket.poll_fd), 1, KOCKET_TIMEOUT_MS);
 		if (ret < 0) {
 			PERROR_LOG("Failed to perform the read/accept poll");
@@ -367,6 +367,11 @@ void* kocket_dispatcher(void* kocket_arg) {
 			break;
 		} else if (ret == 0) continue;
 		
+		if (kocket.poll_fd.revents & POLLHUP) {
+			DEBUG_LOG("Connection closed by the server.");
+			break;
+		}
+
 		if ((kocket.poll_fd.revents & POLLIN) && (ret = kocket_recv(kocket)) < 0) {
 			WARNING_LOG("An error occurred while receiving.");
 			err = ret;
