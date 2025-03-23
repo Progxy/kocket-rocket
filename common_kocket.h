@@ -36,9 +36,15 @@
 #define KOCKET_ARR_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 #define KOCKET_IS_NUM(chr) ((48 <= (chr)) && ((chr) <= 57))
 #define KOCKET_CAST_PTR(ptr, type) ((type*) (ptr))
-#define NO_INLINE __attribute__((__noinline__))
-#define PACKED_STRUCT __attribute__((packed))
 #define KOCKET_CHAR_TO_NUM(chr) ((chr) - 48)
+
+#ifndef NO_INLINE
+	#define NO_INLINE __attribute__((__noinline__))
+#endif //NO_INLINE
+
+#ifndef PACKED_STRUCT
+	#define PACKED_STRUCT __attribute__((packed))
+#endif //PACKED_STRUCT
 
 #ifndef TRUE
 	#define FALSE 0
@@ -49,37 +55,43 @@
 // Printing Macros
 // -------------------------------
 #ifdef _KOCKET_PRINTING_UTILS_
-#define RED           "\033[31m"
-#define GREEN         "\033[32m"
-#define PURPLE        "\033[35m"
-#define CYAN          "\033[36m"
-#define BRIGHT_YELLOW "\033[38;5;214m"    
-#define RESET_COLOR   "\033[0m"
+	#define RED           "\033[31m"
+	#define GREEN         "\033[32m"
+	#define PURPLE        "\033[35m"
+	#define CYAN          "\033[36m"
+	#define BRIGHT_YELLOW "\033[38;5;214m"    
+	#define RESET_COLOR   "\033[0m"
 
-#define WARNING_COLOR BRIGHT_YELLOW
-#define ERROR_COLOR   RED
-#define DEBUG_COLOR   PURPLE
-#define TODO_COLOR    CYAN
+	#define WARNING_COLOR BRIGHT_YELLOW
+	#define ERROR_COLOR   RED
+	#define DEBUG_COLOR   PURPLE
+	#define TODO_COLOR    CYAN
 
-#define COLOR_STR(str, COLOR) COLOR str RESET_COLOR
+	#define COLOR_STR(str, COLOR) COLOR str RESET_COLOR
 
-#include "./str_error.h"
-#ifdef _U_KOCKET_H_
-	#define ERROR_LOG(format, error_str, ...) printf(COLOR_STR("ERROR:%s:" __FILE__ ":%u: ", ERROR_COLOR) format "\n", error_str, __LINE__, ##__VA_ARGS__)
-	#define WARNING_LOG(format, ...)          printf(COLOR_STR("WARNING:" __FILE__ ":%u: ", WARNING_COLOR) format "\n", __LINE__, ##__VA_ARGS__)
-	#define PERROR_LOG(format, ...)           printf(COLOR_STR("WARNING:" __FILE__ ":%u: ", WARNING_COLOR) format ", because: " COLOR_STR("'%s'", BRIGHT_YELLOW) ".\n", __LINE__, ##__VA_ARGS__, str_error())
-	#define DEBUG_LOG(format, ...)            printf(COLOR_STR("DEBUG:" __FILE__ ":%u: ", DEBUG_COLOR) format "\n", __LINE__, ##__VA_ARGS__)
-#else 
-	#define ERROR_LOG(fmt, error_str, ...) printk(KERN_ERR "ERROR:%s:(" __FILE__ ":%u): " fmt "\n", error_str, __LINE__,  ##__VA_ARGS__)
-	#define PERROR_LOG(fmt, err, ...) 	   printk(KERN_WARNING "WARNING:" __FILE__ ":%u: " fmt ", because: " COLOR_STR("'%s'", BRIGHT_YELLOW) ".\n", __LINE__, ##__VA_ARGS__, str_error(err))
-	#define WARNING_LOG(fmt, ...)          printk(KERN_WARNING "WARNING:" __FILE__ ":%u: " fmt "\n", __LINE__,  ##__VA_ARGS__)
-	#define DEBUG_LOG(fmt, ...)            printk(KERN_INFO "DEBUG: " fmt "\n", ##__VA_ARGS__)
-#endif //_U_KOCKET_H_
+	#include "./str_error.h"
+	#ifdef _U_KOCKET_H_
+		#define ERROR_LOG(format, error_str, ...) printf(COLOR_STR("ERROR:%s:" __FILE__ ":%u: ", ERROR_COLOR) format "\n", error_str, __LINE__, ##__VA_ARGS__)
+		#define WARNING_LOG(format, ...)          printf(COLOR_STR("WARNING:" __FILE__ ":%u: ", WARNING_COLOR) format "\n", __LINE__, ##__VA_ARGS__)
+		#define PERROR_LOG(format, ...)           printf(COLOR_STR("WARNING:" __FILE__ ":%u: ", WARNING_COLOR) format ", because: " COLOR_STR("'%s'", BRIGHT_YELLOW) ".\n", __LINE__, ##__VA_ARGS__, str_error())
+		#define DEBUG_LOG(format, ...)            printf(COLOR_STR("DEBUG:" __FILE__ ":%u: ", DEBUG_COLOR) format "\n", __LINE__, ##__VA_ARGS__)
+	#else 
+		#define ERROR_LOG(fmt, error_str, ...) printk(KERN_ERR "ERROR:%s:(" __FILE__ ":%u): " fmt "\n", error_str, __LINE__,  ##__VA_ARGS__)
+		#define PERROR_LOG(fmt, err, ...) 	   printk(KERN_WARNING "WARNING:" __FILE__ ":%u: " fmt ", because: " COLOR_STR("'%s'", BRIGHT_YELLOW) ".\n", __LINE__, ##__VA_ARGS__, str_error(err))
+		#define WARNING_LOG(fmt, ...)          printk(KERN_WARNING "WARNING:" __FILE__ ":%u: " fmt "\n", __LINE__,  ##__VA_ARGS__)
+		#define DEBUG_LOG(fmt, ...)            printk(KERN_INFO "DEBUG: " fmt "\n", ##__VA_ARGS__)
+	#endif //_U_KOCKET_H_
 
 #endif //_KOCKET_PRINTING_UTILS_
 
 /* -------------------------------------------------------------------------------------------------------- */
 #ifdef _KOCKET_UTILS_IMPLEMENTATION_
+static u64 str_len(const char* str) {
+	if (str == NULL) return 0;
+	u64 i = 0;
+	while (*str++) ++i;
+	return i;
+}
 
 static void mem_move(void* dest, const void* src, size_t size) {
     if (dest == NULL || src == NULL || size == 0) return;
@@ -186,18 +198,14 @@ typedef struct PACKED_STRUCT KocketPacket {
 } KocketPacket;
 
 #ifdef _U_KOCKET_H_
-
-typedef struct KocketPacketEntry {
-	KocketPacket kocket_packet;
-} KocketPacketEntry;
-
+	typedef struct KocketPacketEntry {
+		KocketPacket kocket_packet;
+	} KocketPacketEntry;
 #else
-
-typedef struct KocketPacketEntry {
-	KocketPacket kocket_packet;
-	u32 kocket_client_id;
-} KocketPacketEntry;
-
+	typedef struct KocketPacketEntry {
+		KocketPacket kocket_packet;
+		u32 kocket_client_id;
+	} KocketPacketEntry;
 #endif //_U_KOCKET_H_
 
 typedef struct KocketWaitEntry {
@@ -222,38 +230,35 @@ typedef struct KocketType {
 } KocketType;
 
 #ifdef _K_KOCKET_H_
-typedef struct PollSocket {
-	volatile u32 reg_events;
-	struct socket* socket;
-} PollSocket;
+	typedef struct PollSocket {
+		volatile u32 reg_events;
+		struct socket* socket;
+	} PollSocket;
 
-typedef struct ServerKocket {
-	struct socket* socket;
-	int backlog;
-	unsigned short int port;
-	unsigned int address;
-	struct sockaddr_in sock_addr;
-	KocketType* kocket_types;
-	u32 kocket_types_cnt;
-	struct socket** clients;
-	PollSocket* poll_sockets;
-	u32 clients_cnt;
-	bool use_secure_connection;
-} ServerKocket;
-
+	typedef struct ServerKocket {
+		struct socket* socket;
+		int backlog;
+		unsigned short int port;
+		unsigned int address;
+		struct sockaddr_in sock_addr;
+		KocketType* kocket_types;
+		u32 kocket_types_cnt;
+		struct socket** clients;
+		PollSocket* poll_sockets;
+		u32 clients_cnt;
+		bool use_secure_connection;
+	} ServerKocket;
 #else
-
-typedef struct ClientKocket {
-	int socket;
-	unsigned short int port;
-	unsigned int address;
-	struct sockaddr_in sock_addr;
-	KocketType* kocket_types;
-	u32 kocket_types_cnt;
-	struct pollfd poll_fd;
-	bool use_secure_connection;
-} ClientKocket;
-
+	typedef struct ClientKocket {
+		int socket;
+		unsigned short int port;
+		unsigned int address;
+		struct sockaddr_in sock_addr;
+		KocketType* kocket_types;
+		u32 kocket_types_cnt;
+		struct pollfd poll_fd;
+		bool use_secure_connection;
+	} ClientKocket;
 #endif //_K_KOCKET_H_
 
 /* -------------------------------------------------------------------------------------------------------- */
@@ -264,7 +269,22 @@ typedef struct ClientKocket {
 #define KOCKET_TIMEOUT_MS        1000 
 
 /* -------------------------------------------------------------------------------------------------------- */
-// Static Shared Variables
+// --------------------
+//  Macros Definitions
+// --------------------
+#define CHECK_RECV_ERR(err, payload_size) 									 \
+	if (err > 0) {															 \
+		WARNING_LOG("Expected %u bytes but received %d", payload_size, err); \
+		return -KOCKET_NO_DATA_RECEIVED;									 \
+	} else if (err == 0) {													 \
+		WARNING_LOG("The connection has been closed");		 				 \
+		return -KOCKET_CLOSED_CONNECTION;									 \
+	}																		 
+
+/* -------------------------------------------------------------------------------------------------------- */
+// -------------------------
+//  Static Shared Variables
+// -------------------------
 static KocketQueue kocket_writing_queue = {0};
 static KocketQueue kocket_reads_queue = {0};
 static KocketQueue kocket_wait_queue = {0};
@@ -281,14 +301,14 @@ int kocket_deallocate_queue(KocketQueue* kocket_queue);
 int kocket_enqueue(KocketQueue* kocket_queue, void* kocket_entry);
 int kocket_dequeue(KocketQueue* kocket_queue, void* kocket_entry);
 int kocket_get_last_ref(KocketQueue* kocket_queue, void** kocket_entry);
-int kocket_dequeue_packet(KocketQueue* kocket_packets_queue, u64 req_id, KocketPacketEntry* kocket_packet, KocketQueue* kocket_waits_queue, KocketWaitEntry** kocket_wait_entry);
 int is_kocket_queue_empty(KocketQueue* kocket_queue) ;
+int kocket_dequeue_packet(KocketQueue* kocket_packets_queue, u64 req_id, KocketPacketEntry* kocket_packet, KocketQueue* kocket_waits_queue, KocketWaitEntry** kocket_wait_entry);
 int kocket_dequeue_wait(KocketQueue* kocket_waits_queue, u64 req_id);
 int wake_waiting_entry(KocketQueue* kocket_queue, u64 req_id);
 int kocket_addr_to_bytes(const char* str_addr, u32* bytes_addr);
 
 /* -------------------------------------------------------------------------------------------------------- */
-// TODO: Must refactor the code and maybe add some comments
+// TODO: Maybe add some comments
 int kocket_alloc_queue(KocketQueue* kocket_queue, u8 elements_size, FreeElementsHandler free_elements_handler) {
 	if (kocket_queue == NULL) {
 		WARNING_LOG("Invalid kocket_queue, the given kocket_queue is NULL.");
@@ -448,35 +468,11 @@ int kocket_dequeue_packet(KocketQueue* kocket_packets_queue, u64 req_id, KocketP
 		WARNING_LOG("Failed to reallocate the elements.");
 		return -KOCKET_IO_ERROR;
 	}
-		
+	
 	kocket_mutex_unlock(&(kocket_packets_queue -> lock));
 
 	return KOCKET_NO_ERROR;
 }
-
-#ifdef _K_KOCKET_H_
-int kocket_queue_get_n_client_id(KocketQueue* kocket_queue, u32 index, u32* kocket_client_id);
-int kocket_queue_get_n_client_id(KocketQueue* kocket_queue, u32 index, u32* kocket_client_id) {
-	if (kocket_queue == NULL) {
-		WARNING_LOG("Invalid kocket_queue, the given kocket_queue is NULL.");
-		return -KOCKET_IO_ERROR;
-	}
-
-	kocket_mutex_lock(&(kocket_queue -> lock), DEFAULT_LOCK_TIMEOUT_SEC);
-	
-	if (kocket_queue -> size <= index) {
-		kocket_mutex_unlock(&(kocket_queue -> lock));
-		WARNING_LOG("Out of bound index: %u > %u (queue size).", index, kocket_queue -> size);
-		return -KOCKET_INVALID_PARAMETERS;
-	}
-
-	*kocket_client_id = KOCKET_CAST_PTR(kocket_queue -> elements, KocketPacketEntry)[index].kocket_client_id;
-	
-	kocket_mutex_unlock(&(kocket_queue -> lock));
-	
-	return KOCKET_NO_ERROR;
-}
-#endif //_K_KOCKET_H_
 
 int kocket_dequeue_wait(KocketQueue* kocket_waits_queue, u64 req_id) {
 	if (kocket_waits_queue == NULL) {
@@ -555,6 +551,30 @@ int kocket_addr_to_bytes(const char* str_addr, u32* bytes_addr) {
     
     return KOCKET_NO_ERROR;
 }
+
+#ifdef _K_KOCKET_H_
+int kocket_queue_get_n_client_id(KocketQueue* kocket_queue, u32 index, u32* kocket_client_id);
+int kocket_queue_get_n_client_id(KocketQueue* kocket_queue, u32 index, u32* kocket_client_id) {
+	if (kocket_queue == NULL) {
+		WARNING_LOG("Invalid kocket_queue, the given kocket_queue is NULL.");
+		return -KOCKET_IO_ERROR;
+	}
+
+	kocket_mutex_lock(&(kocket_queue -> lock), DEFAULT_LOCK_TIMEOUT_SEC);
+	
+	if (kocket_queue -> size <= index) {
+		kocket_mutex_unlock(&(kocket_queue -> lock));
+		WARNING_LOG("Out of bound index: %u > %u (queue size).", index, kocket_queue -> size);
+		return -KOCKET_INVALID_PARAMETERS;
+	}
+
+	*kocket_client_id = KOCKET_CAST_PTR(kocket_queue -> elements, KocketPacketEntry)[index].kocket_client_id;
+	
+	kocket_mutex_unlock(&(kocket_queue -> lock));
+	
+	return KOCKET_NO_ERROR;
+}
+#endif //_K_KOCKET_H_
 
 #endif //_COMMON_KOCKET_H_
 

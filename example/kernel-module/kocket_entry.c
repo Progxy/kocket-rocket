@@ -105,7 +105,7 @@ static s32 __init example_init(void) {
 	// Randomly exchange some data with the client
 	KocketPacket log_msg = {0};
 	log_msg.type_id = KOCKET_LOG_TYPE;
-	const char log_payload[] = "Here is some data.\n";
+	const char log_payload[] = "Here is some data.";
 	log_msg.payload_size = KOCKET_ARR_SIZE(log_payload);
 	log_msg.payload = (u8*) kocket_calloc(log_msg.payload_size, sizeof(u8));
 	if (log_msg.payload == NULL) {
@@ -133,7 +133,7 @@ static s32 __init example_init(void) {
 
 	KocketPacket log_sec_msg = {0};
 	log_sec_msg.type_id = KOCKET_LOG_TYPE;
-	const char log_sec_payload[] = "Here is some data again.\n";
+	const char log_sec_payload[] = "Here is some data again.";
 	log_sec_msg.payload_size = KOCKET_ARR_SIZE(log_sec_payload);
 	log_sec_msg.payload = (u8*) kocket_calloc(log_sec_msg.payload_size, sizeof(u8));
 	if (log_sec_msg.payload == NULL) {
