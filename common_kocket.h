@@ -85,6 +85,24 @@
 #endif //_KOCKET_PRINTING_UTILS_
 
 /* -------------------------------------------------------------------------------------------------------- */
+#ifdef _KOCKET_SPECIAL_TYPE_SUPPORT_
+
+#define STATIC_ASSERT          _Static_assert
+
+typedef unsigned char      u8;
+typedef unsigned short     u16;
+typedef unsigned int       u32;
+typedef unsigned long long u64;
+STATIC_ASSERT(sizeof(u8)   == 1,  "u8 must be 1 byte");
+STATIC_ASSERT(sizeof(u16)  == 2,  "u16 must be 2 bytes");
+STATIC_ASSERT(sizeof(u32)  == 4,  "u32 must be 4 bytes");
+STATIC_ASSERT(sizeof(u64)  == 8,  "u64 must be 8 bytes");
+
+typedef u8 bool;
+
+#endif //_KOCKET_SPECIAL_TYPE_SUPPORT_
+
+/* -------------------------------------------------------------------------------------------------------- */
 #ifdef _KOCKET_UTILS_IMPLEMENTATION_
 static u64 str_len(const char* str) {
 	if (str == NULL) return 0;
@@ -166,7 +184,7 @@ static const char* kocket_status_str[] = {
 		ts.tv_sec += timeout_sec;
 
 		if (pthread_mutex_timedlock(lock, &ts) != 0) {
-			WARNING_LOG("Mutex lock timed out, as the %lu secs timeout expired.", timeout_sec);
+			WARNING_LOG("Mutex lock timed out, as the %llu secs timeout expired.", timeout_sec);
 			return -KOCKET_FAILED_LOCK;
 		}
 

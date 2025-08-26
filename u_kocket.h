@@ -240,12 +240,12 @@ int kocket_read(u64 req_id, KocketPacketEntry* kocket_packet, bool wait_response
 		kocket_mutex_unlock(&(wait_entry -> lock));
 
 		if ((ret = kocket_dequeue_wait(&kocket_wait_queue, req_id)) < 0) {
-			WARNING_LOG("An error occurred while dequeuing the wait with req_id: %lu", req_id);
+			WARNING_LOG("An error occurred while dequeuing the wait with req_id: %llu", req_id);
 			return ret;
 		}
 			
 		if (ret == KOCKET_REQ_NOT_FOUND) {
-			WARNING_LOG("Something must be wrong as even after waiting the data was still not there, req_id: %lu", req_id);
+			WARNING_LOG("Something must be wrong as even after waiting the data was still not there, req_id: %llu", req_id);
 			return -ret;
 		}
 
@@ -322,7 +322,7 @@ static int kocket_recv(ClientKocket kocket) {
 	DEBUG_LOG("Kocket with type id %u appended to the queue.", kocket_packet.type_id);
 	
 	if ((ret = wake_waiting_entry(&kocket_wait_queue, kocket_packet.req_id))) {
-		WARNING_LOG("Failed to wake entry waiting for req_id: %lu.", kocket_packet.req_id);
+		WARNING_LOG("Failed to wake entry waiting for req_id: %llu.", kocket_packet.req_id);
 		return ret;
 	}
 

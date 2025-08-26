@@ -6,13 +6,8 @@
 #include <sys/socket.h>
 #include <fcntl.h>
 
-#include <stdint.h>
-typedef uint8_t u8;
-typedef uint32_t u32;
-typedef uint64_t u64;
-typedef u8 bool;
-
 #define _KOCKET_PRINTING_UTILS_
+#define _KOCKET_SPECIAL_TYPE_SUPPORT_
 #define _KOCKET_UTILS_IMPLEMENTATION_
 #include "../../u_kocket.h"
 
@@ -129,7 +124,7 @@ int main(int argc, char* argv[]) {
 		return -KOCKET_INVALID_PAYLOAD_SIZE;
 	}
 
-	DEBUG_LOG("Logbuffer size: %lu", *KOCKET_CAST_PTR(info_request_response.payload + sizeof(u32), u64));
+	DEBUG_LOG("Logbuffer size: %llu", *KOCKET_CAST_PTR(info_request_response.payload + sizeof(u32), u64));
 
 	KOCKET_SAFE_FREE(info_request_response.payload);
 		
