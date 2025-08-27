@@ -207,6 +207,7 @@ int kocket_deinit(KocketStatus status) {
 		return KOCKET_NO_ERROR;
 	}
 	
+	// TODO: This one did not catch the dead kthread one time, requires both investigation and testing
 	if (!IS_ERR_OR_NULL(kthread)) {
 		kocket_mutex_unlock(&kocket_status_lock);
 		int err = kthread_stop(kthread);
