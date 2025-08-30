@@ -571,18 +571,19 @@ int kocket_addr_to_bytes(const char* str_addr, u32* bytes_addr) {
     
     u8 temp = 0;
     *bytes_addr = 0;
-    for (u8 i = 0, bytes_cnt = 0; i < 15 && bytes_cnt < 4; ++i, ++str_addr) {
-        if (*str_addr == '.' || *str_addr == '\0') {
-            *bytes_addr = (*bytes_addr << 4) | temp;
-            if (*str_addr == '\0') return KOCKET_NO_ERROR;
+    
+	for (u8 i = 0; i <= str_len(str_addr) && i < 17; ++i) {
+        if (str_addr[i] == '.' || str_addr[i] == '\0') {
+            *bytes_addr = (*bytes_addr << 8) | temp;
+            if (str_addr[i] == '\0') return KOCKET_NO_ERROR;
             temp = 0;
-            bytes_cnt++;
             continue;
-        } else if (!KOCKET_IS_NUM(*str_addr)) {
-            WARNING_LOG("Expected a number but found: '%c'", *str_addr);
+        } else if (!KOCKET_IS_NUM(str_addr[i])) {
+            WARNING_LOG("Expected a number but found: '%c'", str_addr[i]);
             return -KOCKET_INVALID_STR_ADDR;
         }
-        temp = temp * 10 + KOCKET_CHAR_TO_NUM(*str_addr);
+
+        temp = temp * 10 + KOCKET_CHAR_TO_NUM(str_addr[i]);
     }
     
     return KOCKET_NO_ERROR;
