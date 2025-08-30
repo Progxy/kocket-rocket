@@ -290,19 +290,21 @@ static int kocket_recv(ClientKocket kocket) {
 
 	DEBUG_LOG("Receiving %u bytes from the server.", kocket_packet.payload_size);
 
-	kocket_packet.payload = (u8*) kocket_calloc(kocket_packet.payload_size, sizeof(u8));
-	if (kocket_packet.payload == NULL) {
-		WARNING_LOG("An error occurred while allocating the buffer for the payload.");
-		return -KOCKET_IO_ERROR;
+	if (kocket_packet.payload_size > 0) {
+		kocket_packet.payload = (u8*) kocket_calloc(kocket_packet.payload_size, sizeof(u8));
+		if (kocket_packet.payload == NULL) {
+			WARNING_LOG("An error occurred while allocating the buffer for the payload.");
+			return -KOCKET_IO_ERROR;
+		}
+		
+		if ((err = recv(kocket.socket, kocket_packet.payload, kocket_packet.payload_size, 0)) < (long int) kocket_packet.payload_size) {
+			KOCKET_SAFE_FREE(kocket_packet.payload);
+			CHECK_RECV_ERR(err, kocket_packet.payload_size); 
+			PERROR_LOG("An error occurred while reading from the server.");
+			return -KOCKET_IO_ERROR;
+		}
 	}
-	
-	if ((err = recv(kocket.socket, kocket_packet.payload, kocket_packet.payload_size, 0)) < (long int) kocket_packet.payload_size) {
-		KOCKET_SAFE_FREE(kocket_packet.payload);
-		CHECK_RECV_ERR(err, kocket_packet.payload_size); 
-		PERROR_LOG("An error occurred while reading from the server.");
-		return -KOCKET_IO_ERROR;
-	}
-	
+
 	int ret = 0;
 	KocketPacketEntry packet_entry = { .kocket_packet = kocket_packet };
 	if (kocket_packet.type_id < kocket.kocket_types_cnt && (kocket.kocket_types)[kocket_packet.type_id].has_handler) {

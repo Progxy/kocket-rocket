@@ -57,6 +57,7 @@
 #ifdef _KOCKET_PRINTING_UTILS_
 	#define RED           "\033[31m"
 	#define GREEN         "\033[32m"
+	#define BLUE          "\033[34m"
 	#define PURPLE        "\033[35m"
 	#define CYAN          "\033[36m"
 	#define BRIGHT_YELLOW "\033[38;5;214m"    
@@ -66,6 +67,7 @@
 	#define ERROR_COLOR   RED
 	#define DEBUG_COLOR   PURPLE
 	#define TODO_COLOR    CYAN
+	#define INFO_COLOR    BLUE
 
 	#define COLOR_STR(str, COLOR) COLOR str RESET_COLOR
 
@@ -73,12 +75,14 @@
 	#ifdef _U_KOCKET_H_
 		#define ERROR_LOG(format, error_str, ...) printf(COLOR_STR("ERROR:%s:" __FILE__ ":%u: ", ERROR_COLOR) format "\n", error_str, __LINE__, ##__VA_ARGS__)
 		#define WARNING_LOG(format, ...)          printf(COLOR_STR("WARNING:" __FILE__ ":%u: ", WARNING_COLOR) format "\n", __LINE__, ##__VA_ARGS__)
+		#define INFO_LOG(format, ...)             printf(COLOR_STR("INFO:" __FILE__ ":%u: ", INFO_COLOR) format "\n", __LINE__, ##__VA_ARGS__)
 		#define PERROR_LOG(format, ...)           printf(COLOR_STR("WARNING:" __FILE__ ":%u: ", WARNING_COLOR) format ", because: " COLOR_STR("'%s'", BRIGHT_YELLOW) ".\n", __LINE__, ##__VA_ARGS__, str_error())
 		#define DEBUG_LOG(format, ...)            printf(COLOR_STR("DEBUG:" __FILE__ ":%u: ", DEBUG_COLOR) format "\n", __LINE__, ##__VA_ARGS__)
 	#else 
 		#define ERROR_LOG(fmt, error_str, ...) printk(KERN_ERR "ERROR:%s:(" __FILE__ ":%u): " fmt "\n", error_str, __LINE__,  ##__VA_ARGS__)
 		#define PERROR_LOG(fmt, err, ...) 	   printk(KERN_WARNING "WARNING:" __FILE__ ":%u: " fmt ", because: " COLOR_STR("'%s'", BRIGHT_YELLOW) ".\n", __LINE__, ##__VA_ARGS__, str_error(err))
 		#define WARNING_LOG(fmt, ...)          printk(KERN_WARNING "WARNING:" __FILE__ ":%u: " fmt "\n", __LINE__,  ##__VA_ARGS__)
+		#define INFO_LOG(fmt, ...)             printk(KERN_INFO "INFO:" __FILE__ ":%u: " fmt "\n", __LINE__,  ##__VA_ARGS__)
 		#define DEBUG_LOG(fmt, ...)            printk(KERN_INFO "DEBUG: " fmt "\n", ##__VA_ARGS__)
 	#endif //_U_KOCKET_H_
 
@@ -104,6 +108,9 @@ typedef u8 bool;
 
 /* -------------------------------------------------------------------------------------------------------- */
 #ifdef _KOCKET_UTILS_IMPLEMENTATION_
+
+#define HEX_TO_CHR_CAP(val) ((val) > 9 ? (val) + 55 : (val) + '0')
+
 static u64 str_len(const char* str) {
 	if (str == NULL) return 0;
 	u64 i = 0;
@@ -136,6 +143,17 @@ static void mem_set_var(void* ptr, int value, size_t size, size_t val_size) {
 	if (ptr == NULL) return;
 	for (size_t i = 0; i < size; ++i) KOCKET_CAST_PTR(ptr, unsigned char)[i] = KOCKET_CAST_PTR(&value, unsigned char)[i % val_size]; 
 	return;
+}
+
+static char* to_hex_str(u8* val, unsigned int size, char* str) {
+	unsigned int i = 0;
+    for (unsigned int j = 0; j < size; i += 3, ++j) {
+        str[i] = HEX_TO_CHR_CAP((val[j] >> 4) & 0xF);
+        str[i + 1] = HEX_TO_CHR_CAP(val[j] & 0xF);
+		str[i + 2] = ' ';	
+    }
+    str[i] = '\0';
+    return str;
 }
 
 #endif // _KOCKET_UTILS_IMPLEMENTATION_
