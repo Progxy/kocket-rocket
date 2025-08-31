@@ -242,7 +242,7 @@ static inline KocketStatus check_kocket_status(void) {
 	return status;
 }
 
-/// NOTE: This function expects that the payload within kocket_packet to be dynamically allocated
+/// NOTE: This function expects that the payload within kocket_packet has been dynamically allocated
 int kocket_write(KocketPacketEntry* packet_entry, bool update_req_id) {
 	KocketStatus status = KOCKET_NO_ERROR;
 	if ((status = check_kocket_status()) < 0) return status;

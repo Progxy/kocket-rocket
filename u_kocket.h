@@ -381,7 +381,7 @@ void* kocket_dispatcher(void* kocket_arg) {
 	while (!thread_should_stop() && !err) {
 		int ret = poll(&(kocket.poll_fd), 1, KOCKET_TIMEOUT_MS);
 		if (ret < 0) {
-			PERROR_LOG("Failed to perform the read/accept poll");
+			PERROR_LOG("Failed to perform the poll");
 			err = -KOCKET_IO_ERROR;
 			break;
 		} else if (ret == 0) continue;
@@ -390,7 +390,7 @@ void* kocket_dispatcher(void* kocket_arg) {
 			DEBUG_LOG("Connection closed by the server.");
 			break;
 		}
-
+		
 		if ((kocket.poll_fd.revents & POLLIN) && (ret = kocket_recv(kocket)) < 0) {
 			WARNING_LOG("An error occurred while receiving.");
 			err = ret;

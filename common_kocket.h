@@ -77,13 +77,21 @@
 		#define WARNING_LOG(format, ...)          printf(COLOR_STR("WARNING:" __FILE__ ":%u: ", WARNING_COLOR) format "\n", __LINE__, ##__VA_ARGS__)
 		#define INFO_LOG(format, ...)             printf(COLOR_STR("INFO:" __FILE__ ":%u: ", INFO_COLOR) format "\n", __LINE__, ##__VA_ARGS__)
 		#define PERROR_LOG(format, ...)           printf(COLOR_STR("WARNING:" __FILE__ ":%u: ", WARNING_COLOR) format ", because: " COLOR_STR("'%s'", BRIGHT_YELLOW) ".\n", __LINE__, ##__VA_ARGS__, str_error())
-		#define DEBUG_LOG(format, ...)            printf(COLOR_STR("DEBUG:" __FILE__ ":%u: ", DEBUG_COLOR) format "\n", __LINE__, ##__VA_ARGS__)
+		#ifdef _DEBUG
+			#define DEBUG_LOG(format, ...)            printf(COLOR_STR("DEBUG:" __FILE__ ":%u: ", DEBUG_COLOR) format "\n", __LINE__, ##__VA_ARGS__)
+		#else 
+			#define DEBUG_LOG(format, ...)
+		#endif //_DEBUG	
 	#else 
 		#define ERROR_LOG(fmt, error_str, ...) printk(KERN_ERR "ERROR:%s:(" __FILE__ ":%u): " fmt "\n", error_str, __LINE__,  ##__VA_ARGS__)
 		#define PERROR_LOG(fmt, err, ...) 	   printk(KERN_WARNING "WARNING:" __FILE__ ":%u: " fmt ", because: " COLOR_STR("'%s'", BRIGHT_YELLOW) ".\n", __LINE__, ##__VA_ARGS__, str_error(err))
 		#define WARNING_LOG(fmt, ...)          printk(KERN_WARNING "WARNING:" __FILE__ ":%u: " fmt "\n", __LINE__,  ##__VA_ARGS__)
 		#define INFO_LOG(fmt, ...)             printk(KERN_INFO "INFO:" __FILE__ ":%u: " fmt "\n", __LINE__,  ##__VA_ARGS__)
-		#define DEBUG_LOG(fmt, ...)            printk(KERN_INFO "DEBUG: " fmt "\n", ##__VA_ARGS__)
+		#ifdef _DEBUG
+			#define DEBUG_LOG(fmt, ...)            printk(KERN_INFO "DEBUG: " fmt "\n", ##__VA_ARGS__)
+		#else
+			#define DEBUG_LOG(fmt, ...)
+		#endif //_DEBUG	
 	#endif //_U_KOCKET_H_
 
 #endif //_KOCKET_PRINTING_UTILS_
@@ -396,7 +404,7 @@ int kocket_enqueue(KocketQueue* kocket_queue, void* kocket_entry) {
 	}
 	
 	mem_cpy(KOCKET_CAST_PTR(kocket_queue -> elements, u8) + kocket_queue -> elements_size * (kocket_queue -> size - 1), kocket_entry, kocket_queue -> elements_size);
-		
+
 	kocket_mutex_unlock(&(kocket_queue -> lock));
 
 	return KOCKET_NO_ERROR;
@@ -419,7 +427,7 @@ int kocket_dequeue(KocketQueue* kocket_queue, void* kocket_entry) {
 		WARNING_LOG("Failed to reallocate the elements.");
 		return -KOCKET_IO_ERROR;
 	}
-		
+
 	kocket_mutex_unlock(&(kocket_queue -> lock));
 	
 	return KOCKET_NO_ERROR;
