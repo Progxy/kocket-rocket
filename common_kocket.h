@@ -326,6 +326,8 @@ typedef struct KocketType {
 	}																		 
 
 /* -------------------------------------------------------------------------------------------------------- */
+// TODO: Those should most probably be put into a KocketContext that is allocated by the main thread
+// and passed by reference to the kocket thread in order to prevent inconsistency in the state
 // -------------------------
 //  Static Shared Variables
 // -------------------------
