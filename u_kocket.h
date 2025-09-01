@@ -282,8 +282,10 @@ static int kocket_send(ClientKocket kocket, KocketPacket kocket_packet) {
 static int kocket_recv(ClientKocket kocket) {
 	int err = 0;
 	KocketPacket kocket_packet = {0};
-	if ((err = recv(kocket.socket, &kocket_packet, sizeof(KocketPacket) - sizeof(u8*), 0)) < (long long int) (sizeof(KocketPacket) - sizeof(u8*))) {
-		CHECK_RECV_ERR(err, kocket_packet.payload_size); 
+	u32 kocket_packet_hdr_size = sizeof(KocketPacket) - sizeof(u8*);
+
+	if ((err = recv(kocket.socket, &kocket_packet, kocket_packet_hdr_size, 0)) < (long long int) kocket_packet_hdr_size) {
+		CHECK_RECV_ERR(err, kocket_packet_hdr_size, kocket_packet.req_id); 
 		PERROR_LOG("An error occurred while reading from the client");
 		return -KOCKET_IO_ERROR;
 	}
@@ -299,7 +301,7 @@ static int kocket_recv(ClientKocket kocket) {
 		
 		if ((err = recv(kocket.socket, kocket_packet.payload, kocket_packet.payload_size, 0)) < (long int) kocket_packet.payload_size) {
 			KOCKET_SAFE_FREE(kocket_packet.payload);
-			CHECK_RECV_ERR(err, kocket_packet.payload_size); 
+			CHECK_RECV_ERR(err, kocket_packet.payload_size, kocket_packet.req_id); 
 			PERROR_LOG("An error occurred while reading from the server.");
 			return -KOCKET_IO_ERROR;
 		}
@@ -372,6 +374,53 @@ static int kocket_poll_write(ClientKocket* kocket) {
 	return KOCKET_NO_ERROR;
 }
 
+static int can_read_full_packet(ClientKocket kocket) {
+	int err = 0;
+	KocketPacket kocket_packet = {0};
+	u32 kocket_packet_hdr_size = sizeof(KocketPacket) - sizeof(u8*);
+
+	// Peek the packet header for retrieving payload info
+	if ((err = recv(kocket.socket, &kocket_packet, kocket_packet_hdr_size, MSG_PEEK)) < (long long int) (kocket_packet_hdr_size)) {
+		if (err < 0) {
+			PERROR_LOG("An error occurred while reading from the server");
+			return -KOCKET_IO_ERROR;
+		} else if (err == 0) {                                                                  
+			WARNING_LOG("The connection has been closed");                                      
+			return -KOCKET_CLOSED_CONNECTION;                                                   
+		}																		 
+		
+		return KOCKET_NO_ERROR;
+	}
+
+	// If payload is present peek the payload
+	// NOTE: the previous peek does not consume data, therefore the header will still be there before the payload
+	if (kocket_packet.payload_size > 0) {
+		kocket_packet.payload = (u8*) kocket_calloc(kocket_packet.payload_size + kocket_packet_hdr_size, sizeof(u8));
+		if (kocket_packet.payload == NULL) {
+			WARNING_LOG("An error occurred while allocating the buffer for the payload.");
+			return -KOCKET_IO_ERROR;
+		}
+		
+		if ((err = recv(kocket.socket, kocket_packet.payload, kocket_packet.payload_size + kocket_packet_hdr_size, MSG_PEEK)) < (long int) (kocket_packet.payload_size + kocket_packet_hdr_size)) {
+			KOCKET_SAFE_FREE(kocket_packet.payload);
+			
+			if (err < 0) {
+				PERROR_LOG("An error occurred while reading from the server");
+				return -KOCKET_IO_ERROR;
+			} else if (err == 0) {                                                                  
+				WARNING_LOG("The connection has been closed");                                      
+				return -KOCKET_CLOSED_CONNECTION;                                                   
+			}																		 
+			
+			return KOCKET_NO_ERROR;
+		}
+	}
+
+	KOCKET_SAFE_FREE(kocket_packet.payload);
+
+	return KOCKET_PACKET_AVAILABLE;
+}
+
 // This will be the function executed by the kocket-thread.
 void* kocket_dispatcher(void* kocket_arg) {
 	ClientKocket kocket = *KOCKET_CAST_PTR(kocket_arg, ClientKocket);
@@ -391,8 +440,14 @@ void* kocket_dispatcher(void* kocket_arg) {
 			break;
 		}
 		
-		if ((kocket.poll_fd.revents & POLLIN) && (ret = kocket_recv(kocket)) < 0) {
-			WARNING_LOG("An error occurred while receiving.");
+		if ((kocket.poll_fd.revents & POLLIN) && (ret = can_read_full_packet(kocket)) == KOCKET_PACKET_AVAILABLE) {
+		   	if ((ret = kocket_recv(kocket)) < 0) {
+				WARNING_LOG("An error occurred while receiving.");
+				err = ret;
+				break;
+			}
+		} else if (ret < 0) {
+			WARNING_LOG("An error occurred while checking if the entire packet is available for read.");
 			err = ret;
 			break;
 		}

@@ -180,6 +180,7 @@ typedef enum KocketStatus {
 	KOCKET_FAILED_LOCK,
 	KOCKET_NO_DATA_RECEIVED,
 	KOCKET_CLOSED_CONNECTION,
+	KOCKET_PACKET_AVAILABLE,
 	KOCKET_TODO 
 } KocketStatus;
 
@@ -195,6 +196,7 @@ static const char* kocket_status_str[] = {
 	"KOCKET_FAILED_LOCK",
 	"KOCKET_NO_DATA_RECEIVED",
 	"KOCKET_CLOSED_CONNECTION",
+	"KOCKET_PACKET_AVAILABLE",
 	"KOCKET_TODO"
 };
 
@@ -316,13 +318,13 @@ typedef struct KocketType {
 // --------------------
 //  Macros Definitions
 // --------------------
-#define CHECK_RECV_ERR(err, payload_size) 									 \
-	if (err > 0) {															 \
-		WARNING_LOG("Expected %u bytes but received %d", payload_size, err); \
-		return -KOCKET_NO_DATA_RECEIVED;									 \
-	} else if (err == 0) {													 \
-		WARNING_LOG("The connection has been closed");		 				 \
-		return -KOCKET_CLOSED_CONNECTION;									 \
+#define CHECK_RECV_ERR(err, payload_size, id)                                                  \
+	if (err > 0) {                                                                             \
+		WARNING_LOG("Expected %u bytes but received %d with id: %llu", payload_size, err, id); \
+		return -KOCKET_NO_DATA_RECEIVED;                                                       \
+	} else if (err == 0) {                                                                     \
+		WARNING_LOG("The connection has been closed");                                         \
+		return -KOCKET_CLOSED_CONNECTION;                                                      \
 	}																		 
 
 /* -------------------------------------------------------------------------------------------------------- */

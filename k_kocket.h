@@ -333,16 +333,17 @@ static int kocket_send(ServerKocket kocket, KocketPacketEntry packet_entry) {
 
 static int kocket_recv(ServerKocket kocket, u32 kocket_client_id) {
 	if (kocket_client_id >= kocket.clients_cnt) {
-		WARNING_LOG("ServerKocket client if out of bound: %u >= %u.", kocket_client_id, kocket.clients_cnt);
+		WARNING_LOG("ServerKocket client is out of bound: %u >= %u.", kocket_client_id, kocket.clients_cnt);
 		return -INVALID_KOCKET_CLIENT_ID;
 	}
 	
 	int err = 0;
 	struct msghdr msg_hdr = {0};
 	KocketPacket kocket_packet = {0};
-	struct kvec vec = { .iov_len = sizeof(KocketPacket) - sizeof(u8*), .iov_base = &kocket_packet };
-	if ((err = kernel_recvmsg((kocket.clients)[kocket_client_id], &msg_hdr, &vec, sizeof(KocketPacket) - sizeof(u8*), sizeof(KocketPacket) - sizeof(u8*), 0)) < (sizeof(KocketPacket) - sizeof(u8*))) {
-		CHECK_RECV_ERR(err, kocket_packet.payload_size);
+	u32 kocket_packet_hdr_size = sizeof(KocketPacket) - sizeof(u8*);
+	struct kvec vec = { .iov_len = kocket_packet_hdr_size, .iov_base = &kocket_packet };
+	if ((err = kernel_recvmsg((kocket.clients)[kocket_client_id], &msg_hdr, &vec, kocket_packet_hdr_size, kocket_packet_hdr_size, 0)) < kocket_packet_hdr_size) {
+		CHECK_RECV_ERR(err, kocket_packet_hdr_size, kocket_packet.req_id);
 		PERROR_LOG("An error occurred while reading from the client", err);
 		return -KOCKET_IO_ERROR;
 	}
@@ -356,11 +357,11 @@ static int kocket_recv(ServerKocket kocket, u32 kocket_client_id) {
 			return -KOCKET_IO_ERROR;
 		}
 		
-		struct msghdr payload_msg_hdr = (struct msghdr) {0};
-		struct kvec payload_vec = (struct kvec) { .iov_len = kocket_packet.payload_size, .iov_base = kocket_packet.payload };
+		struct msghdr payload_msg_hdr = {0};
+		struct kvec payload_vec = { .iov_len = kocket_packet.payload_size, .iov_base = kocket_packet.payload };
 		if ((err = kernel_recvmsg((kocket.clients)[kocket_client_id], &payload_msg_hdr, &payload_vec, kocket_packet.payload_size, kocket_packet.payload_size, 0)) < kocket_packet.payload_size) {
 			KOCKET_SAFE_FREE(kocket_packet.payload);
-			CHECK_RECV_ERR(err, kocket_packet.payload_size);
+			CHECK_RECV_ERR(err, kocket_packet.payload_size, kocket_packet.req_id);
 			PERROR_LOG("An error occurred while reading from the client", err);
 			return -KOCKET_IO_ERROR;
 		}
@@ -419,6 +420,62 @@ static int kocket_release_client(ServerKocket* kocket, u32 index) {
 	return KOCKET_NO_ERROR;
 }
 
+static int can_read_full_packet(ServerKocket kocket, u32 kocket_client_id) {
+	if (kocket_client_id >= kocket.clients_cnt) {
+		WARNING_LOG("ServerKocket client is out of bound: %u >= %u.", kocket_client_id, kocket.clients_cnt);
+		return -INVALID_KOCKET_CLIENT_ID;
+	}
+
+	int err = 0;
+	struct msghdr msg_hdr = {0};
+	KocketPacket kocket_packet = {0};
+	u32 kocket_packet_hdr_size = sizeof(KocketPacket) - sizeof(u8*);
+	struct kvec vec = { .iov_len = kocket_packet_hdr_size, .iov_base = &kocket_packet };
+
+	// Peek the packet header for retrieving payload info
+	if ((err = kernel_recvmsg((kocket.clients)[kocket_client_id], &msg_hdr, &vec, kocket_packet_hdr_size, kocket_packet_hdr_size, MSG_PEEK)) < kocket_packet_hdr_size) {
+		if (err < 0) {
+			WARNING_LOG("An error occurred while reading from the server");
+			return -KOCKET_IO_ERROR;
+		} else if (err == 0) {                                                                  
+			WARNING_LOG("The connection has been closed");                                      
+			return -KOCKET_CLOSED_CONNECTION;                                                   
+		}																		 
+		
+		return KOCKET_NO_ERROR;
+	}
+
+	// If payload is present peek the payload
+	// NOTE: the previous peek does not consume data, therefore the header will still be there before the payload
+	if (kocket_packet.payload_size > 0) {
+		kocket_packet.payload = (u8*) kocket_calloc(kocket_packet.payload_size + kocket_packet_hdr_size, sizeof(u8));
+		if (kocket_packet.payload == NULL) {
+			WARNING_LOG("An error occurred while allocating the buffer for the payload.");
+			return -KOCKET_IO_ERROR;
+		}
+		
+		struct msghdr payload_msg_hdr = {0};
+		struct kvec payload_vec = { .iov_len = kocket_packet.payload_size + kocket_packet_hdr_size, .iov_base = kocket_packet.payload };
+		if ((err = kernel_recvmsg((kocket.clients)[kocket_client_id], &payload_msg_hdr, &payload_vec, kocket_packet.payload_size + kocket_packet_hdr_size, kocket_packet.payload_size + kocket_packet_hdr_size, MSG_PEEK)) < kocket_packet.payload_size + kocket_packet_hdr_size) {
+			KOCKET_SAFE_FREE(kocket_packet.payload);
+			
+			if (err < 0) {
+				WARNING_LOG("An error occurred while reading from the server");
+				return -KOCKET_IO_ERROR;
+			} else if (err == 0) {                                                                  
+				WARNING_LOG("The connection has been closed");                                      
+				return -KOCKET_CLOSED_CONNECTION;                                                   
+			}																		 
+			
+			return KOCKET_NO_ERROR;
+		}
+	}
+
+	KOCKET_SAFE_FREE(kocket_packet.payload);
+
+	return KOCKET_PACKET_AVAILABLE;
+}
+
 static int kocket_poll(PollSocket* poll_sockets, u32 sks_cnt, u32 timeout) {
     if (poll_sockets == NULL) {
 		WARNING_LOG("poll_sockets must be non-NULL: %p.", poll_sockets);
@@ -459,7 +516,7 @@ static int kocket_poll(PollSocket* poll_sockets, u32 sks_cnt, u32 timeout) {
 			mask |= poll_sockets[i].reg_events;
 			continue;
 		}
-
+		
 		if (!skb_queue_empty(&(sk -> sk_receive_queue))) poll_sockets[i].reg_events |= POLLIN | POLLRDNORM;
 		if (sock_writeable(sk)) poll_sockets[i].reg_events |= POLLOUT | POLLWRNORM;
 		
@@ -511,8 +568,18 @@ static int kocket_poll_read_accept(ServerKocket* kocket) {
 				WARNING_LOG("Failed to release the client %u.", i);
 				return err;
 			}
-		} else if (((kocket -> poll_sockets)[i].reg_events & POLLIN) && ((err = kocket_recv(*kocket, i - 1)) < 0)) {
-			WARNING_LOG("Failed to receive data: '%s'", kocket_status_str[err < 0 ? -err : err]);
+		}
+		
+		if (((kocket -> poll_sockets)[i].reg_events & POLLIN) && (err = can_read_full_packet(*kocket, i - 1)) == KOCKET_PACKET_AVAILABLE) {
+		   	if ((err = kocket_recv(*kocket, i - 1)) < 0) {
+				WARNING_LOG("Failed to receive data: '%s'", kocket_status_str[err > 0 ? err : -err]);
+				if ((err = kocket_release_client(kocket, i - 1)) < 0) { 
+					WARNING_LOG("Failed to release the client %u.", i);
+					return err;
+				}
+			}
+		} else if (err < 0) {
+			WARNING_LOG("Failed to check if the entire packet is available for read: '%s'", kocket_status_str[err > 0 ? err : -err]);
 			if ((err = kocket_release_client(kocket, i - 1)) < 0) { 
 				WARNING_LOG("Failed to release the client %u.", i);
 				return err;
