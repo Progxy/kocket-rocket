@@ -307,6 +307,16 @@ typedef struct KocketType {
 	} ClientKocket;
 #endif //_K_KOCKET_H_
 
+typedef struct KocketTask {
+	KocketHandler kocket_handler;
+	char* type_name;
+	KocketPacketEntry kocket_packet_entry;
+	int result;
+#ifdef _K_KOCKET_H_
+	struct completion done;
+#endif //_K_KOCKET_H_
+} KocketTask;
+
 /* -------------------------------------------------------------------------------------------------------- */
 // Constant Values
 // NOTE: Those values should be changed based on the requirement of the operational environment.

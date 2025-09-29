@@ -279,6 +279,8 @@ static int kocket_send(ClientKocket kocket, KocketPacket kocket_packet) {
 	return KOCKET_NO_ERROR;
 }
 
+/// TODO: Missing implementation of dispatch_handler_as_task
+
 static int kocket_recv(ClientKocket kocket) {
 	int err = 0;
 	KocketPacket kocket_packet = {0};

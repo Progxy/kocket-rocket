@@ -23,6 +23,8 @@
 #include <linux/sched.h>
 #include <linux/signal.h>
 #include <linux/jiffies.h>
+#include <linux/completion.h>
+#include <linux/delay.h>
 
 // ------------------
 //  Static Variables
@@ -331,6 +333,17 @@ static int kocket_send(ServerKocket kocket, KocketPacketEntry packet_entry) {
 	return KOCKET_NO_ERROR;
 }
 
+static int dispatch_handler_as_task(void* task_args) {
+	KocketTask* handler_task = (KocketTask*) task_args;
+	if ((handler_task -> result = (handler_task -> kocket_handler)(handler_task -> kocket_packet_entry)) < 0) {
+		WARNING_LOG("An error occurred while executing the handler for the type: '%s'", handler_task -> type_name);
+	}
+	
+	complete(&handler_task -> done);
+	
+	return 0;
+}
+
 static int kocket_recv(ServerKocket kocket, u32 kocket_client_id) {
 	if (kocket_client_id >= kocket.clients_cnt) {
 		WARNING_LOG("ServerKocket client is out of bound: %u >= %u.", kocket_client_id, kocket.clients_cnt);
@@ -371,10 +384,34 @@ static int kocket_recv(ServerKocket kocket, u32 kocket_client_id) {
 	KocketPacketEntry packet_entry = { .kocket_packet = kocket_packet, .kocket_client_id = kocket_client_id };
 	if (kocket_packet.type_id < kocket.kocket_types_cnt && (kocket.kocket_types)[kocket_packet.type_id].has_handler) {
 		DEBUG_LOG("Handling kocket with type id: %u", kocket_packet.type_id);
-		if ((ret = (*((kocket.kocket_types)[kocket_packet.type_id].kocket_handler)) (packet_entry)) < 0) {
+		
+		KocketTask* handler_task = kocket_calloc(1, sizeof(KocketTask));
+		if (handler_task == NULL) {
+			WARNING_LOG("An error occurred while allocating the task handler.");
+			return -KOCKET_IO_ERROR;
+		}
+
+		handler_task -> kocket_packet_entry = packet_entry;
+		handler_task -> kocket_handler = *((kocket.kocket_types)[kocket_packet.type_id].kocket_handler);
+		init_completion(&handler_task -> done);
+
+	    struct task_struct* task_handler = kthread_run(dispatch_handler_as_task, handler_task, (kocket.kocket_types)[kocket_packet.type_id].type_name);
+		if (IS_ERR(task_handler)) {
+			KOCKET_SAFE_FREE(handler_task);
+			WARNING_LOG("Failed to create and run the kthread.");
+			return -KOCKET_IO_ERROR;
+		}
+
+		wait_for_completion(&handler_task -> done);
+		
+		ret = handler_task -> result;
+		KOCKET_SAFE_FREE(handler_task);
+
+		if (ret < 0) {
 			WARNING_LOG("An error occurred while executing the handler for the type: '%s'", (kocket.kocket_types)[kocket_packet.type_id].type_name);
 			return ret;
 		}
+
 		return KOCKET_NO_ERROR;
 	} 
 	
