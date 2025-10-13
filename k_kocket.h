@@ -335,12 +335,18 @@ static int kocket_send(ServerKocket kocket, KocketPacketEntry packet_entry) {
 
 static int dispatch_handler_as_task(void* task_args) {
 	KocketTask* handler_task = (KocketTask*) task_args;
+
+	unsigned long flags = 0;
+	local_irq_save(flags);
+
 	if ((handler_task -> result = (handler_task -> kocket_handler)(handler_task -> kocket_packet_entry)) < 0) {
 		WARNING_LOG("An error occurred while executing the handler for the type: '%s'", handler_task -> type_name);
 	}
 	
 	complete(&handler_task -> done);
-	
+
+	local_irq_restore(flags);
+
 	return 0;
 }
 
