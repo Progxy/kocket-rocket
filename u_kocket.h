@@ -40,6 +40,7 @@ int kocket_deinit(KocketStatus status);
 int kocket_write(KocketPacketEntry* kocket_packet, bool update_req_id);
 int kocket_read(u64 req_id, KocketPacketEntry* kocket_packet, bool wait_response);
 static int kocket_send(ClientKocket kocket, KocketPacket kocket_packet);
+static void* dispatch_handler_as_task(void* task_args);
 static int kocket_recv(ClientKocket kocket);
 static inline void stop_thread(void);
 static KocketStatus thread_should_stop(void);
@@ -279,7 +280,17 @@ static int kocket_send(ClientKocket kocket, KocketPacket kocket_packet) {
 	return KOCKET_NO_ERROR;
 }
 
-/// TODO: Missing implementation of dispatch_handler_as_task
+static void* dispatch_handler_as_task(void* task_args) {
+	KocketTask* handler_task = (KocketTask*) task_args;
+	
+	if ((handler_task -> result = (handler_task -> kocket_handler)(handler_task -> kocket_packet_entry)) < 0) {
+		WARNING_LOG("An error occurred while executing the handler for the type: '%s'", handler_task -> type_name);
+	}
+	
+	kocket_mutex_unlock(&handler_task -> done);
+
+	return NULL;
+}
 
 static int kocket_recv(ClientKocket kocket) {
 	int err = 0;
@@ -312,11 +323,39 @@ static int kocket_recv(ClientKocket kocket) {
 	int ret = 0;
 	KocketPacketEntry packet_entry = { .kocket_packet = kocket_packet };
 	if (kocket_packet.type_id < kocket.kocket_types_cnt && (kocket.kocket_types)[kocket_packet.type_id].has_handler) {
-		if ((ret = (*((kocket.kocket_types)[kocket_packet.type_id].kocket_handler)) (packet_entry)) < 0) {
+		DEBUG_LOG("Handling kocket with type id: %u", kocket_packet.type_id);
+		
+		KocketTask* handler_task = kocket_calloc(1, sizeof(KocketTask));
+		if (handler_task == NULL) {
+			WARNING_LOG("An error occurred while allocating the task handler.");
+			return -KOCKET_IO_ERROR;
+		}
+
+		handler_task -> kocket_packet_entry = packet_entry;
+		handler_task -> type_name = (kocket.kocket_types)[kocket_packet.type_id].type_name;
+		handler_task -> kocket_handler = *((kocket.kocket_types)[kocket_packet.type_id].kocket_handler);
+		kocket_mutex_init(&handler_task -> done);
+		kocket_mutex_lock(&handler_task -> done, 1);
+
+		pthread_t task_handler = 0;
+		if (pthread_create(&task_handler, NULL, dispatch_handler_as_task, handler_task) != 0) {
+			KOCKET_SAFE_FREE(handler_task);
+			WARNING_LOG("Failed to create and run the kthread.");
+			return -KOCKET_IO_ERROR;
+		}
+
+		kocket_mutex_lock(&handler_task -> done, DEFAULT_LOCK_TIMEOUT_SEC);
+		kocket_mutex_unlock(&handler_task -> done);
+		kocket_mutex_destroy(&handler_task -> done);
+		
+		ret = handler_task -> result;
+		KOCKET_SAFE_FREE(handler_task);
+		
+		if (ret < 0) {
 			WARNING_LOG("An error occurred while executing the handler for the type: '%s'", (kocket.kocket_types)[kocket_packet.type_id].type_name);
 			return ret;
 		}
-		DEBUG_LOG("Handled kocket with type_id: %u", kocket_packet.type_id);
+		
 		return KOCKET_NO_ERROR;
 	} 
 

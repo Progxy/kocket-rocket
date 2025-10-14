@@ -314,6 +314,8 @@ typedef struct KocketTask {
 	int result;
 #ifdef _K_KOCKET_H_
 	struct completion done;
+#else 
+	mutex_t done;
 #endif //_K_KOCKET_H_
 } KocketTask;
 

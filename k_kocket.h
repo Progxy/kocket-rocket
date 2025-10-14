@@ -45,6 +45,7 @@ static inline KocketStatus check_kocket_status(void);
 int kocket_write(KocketPacketEntry* packet_entry, bool update_req_id);
 int kocket_read(u64 req_id, KocketPacketEntry* kocket_packet, bool wait_response);
 static int kocket_send(ServerKocket kocket, KocketPacketEntry packet_entry);
+static int dispatch_handler_as_task(void* task_args);
 static int kocket_recv(ServerKocket kocket, u32 kocket_client_id);
 static int kocket_release_client(ServerKocket* kocket, u32 index);
 static int kocket_poll(PollSocket* poll_sockets, u32 sks_cnt, u32 timeout);
@@ -398,10 +399,11 @@ static int kocket_recv(ServerKocket kocket, u32 kocket_client_id) {
 		}
 
 		handler_task -> kocket_packet_entry = packet_entry;
+		handler_task -> type_name = (kocket.kocket_types)[kocket_packet.type_id].type_name;
 		handler_task -> kocket_handler = *((kocket.kocket_types)[kocket_packet.type_id].kocket_handler);
 		init_completion(&handler_task -> done);
 
-	    struct task_struct* task_handler = kthread_run(dispatch_handler_as_task, handler_task, (kocket.kocket_types)[kocket_packet.type_id].type_name);
+	    struct task_struct* task_handler = kthread_run(dispatch_handler_as_task, handler_task, handler_task -> type_name);
 		if (IS_ERR(task_handler)) {
 			KOCKET_SAFE_FREE(handler_task);
 			WARNING_LOG("Failed to create and run the kthread.");
