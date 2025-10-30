@@ -11,3 +11,4 @@ The security of the communication will be provided via the following algorithms:
  - [RFC 8032](https://datatracker.ietf.org/doc/html/rfc8032) - (Ed25519).
  - [RFC 8439](https://datatracker.ietf.org/doc/html/rfc8439) - (ChaCha20-Poly1305).
  - [RFC 7748](https://datatracker.ietf.org/doc/html/rfc7748) - (X25519).
+ - [RFC 6234](https://datatracker.ietf.org/doc/html/rfc6234) - (SHA-512).
