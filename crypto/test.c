@@ -11,14 +11,33 @@ int main() {
 	
 	u64 hash[8] = {0};
 	u8 data[] = "abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu";
-	/* "Hi mom, I feel well again!"; */
 	printf("Testing SHA-512:\n");
 	if ((ret = sha512(data, sizeof(data) - 1, hash))) {
 		printf("ERROR::%s: while testing SHA-512.\n", kocket_status_str[-ret]);
 		return ret;
 	}
 
-	print_hash(hash);
+	const u64 test_sha[] = {
+		0x8E959B75DAE313DA,  
+		0x8CF4F72814FC143F,
+		0x8F7779C6EB9F7FA1, 
+		0x7299AEADB6889018, 
+		0x501D289E4900F7E4,
+		0x331B99DEC4B5433A,
+	   	0xC7D329EEB6DD2654, 
+		0x5E96E55B874BE909 
+	};
+
+	if (mem_cmp(hash, test_sha, sizeof(test_sha))) {
+		printf("Failed test sha512.\n");
+		printf("HASHED: \n");
+		print_hash((u8*) hash);
+		printf("Expected: \n");
+		print_hash((u8*) test_sha);
+		return 1;
+	}
+
+	print_hash((u8*) hash);
 
 	printf("Testing ED25519:\n");
 	if ((ret = ed25519(NULL))) {

@@ -156,6 +156,14 @@ static void* mem_cpy(void* dest, const void* src, size_t size) {
 	return dest;
 }
 
+static int mem_cmp(const void* a, const void* b, size_t size) {
+	if (a == NULL || b == NULL) return -2;
+	for (size_t i = 0; i < size; ++i) {
+		if (KOCKET_CAST_PTR(a, unsigned char)[i] != KOCKET_CAST_PTR(b, unsigned char)[i]) return -1;
+	}
+	return 0;
+}
+
 #define mem_set(ptr, value, size)    mem_set_var(ptr, value, size, sizeof(u8))
 #define mem_set_32(ptr, value, size) mem_set_var(ptr, value, size, sizeof(u32))
 #define mem_set_64(ptr, value, size) mem_set_var(ptr, value, size, sizeof(u64))

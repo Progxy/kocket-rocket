@@ -51,11 +51,11 @@ static const u64 costants[] = {
 	0x4CC5D4BECB3E42B6, 0x597F299CFC657E2A, 0x5FCB6FAB3AD6FAEC, 0x6C44198C4A475817
 };
 
-void print_hash(u64 hash[8]) {
+void print_hash(u8* hash) {
 	printf("hash: ");
 	
 	for (unsigned int i = 0; i < 8; ++i) {
-		printf("%llX", hash[i]);
+		printf("%llX", ((u64*) hash)[i]);
 	}
 	
 	printf("\n");
