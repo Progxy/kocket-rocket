@@ -97,6 +97,8 @@ u8* padding(u8* data, u64 len, int* blocks_cnt) {
 	padded_data[len] = 0x80;
 	((u64*) padded_data)[new_size / 8 - 2] = len >> 61;	
 	((u64*) padded_data)[new_size / 8 - 1] = len * 8;	
+	KOCKET_BE_CONVERT(((u64*) padded_data) + (new_size / 8 - 2), 8);
+	KOCKET_BE_CONVERT(((u64*) padded_data) + (new_size / 8 - 1), 8);
 	
 	DEBUG_LOG("blocks_cnt: %d, k: %llu, new_size: %llu", *blocks_cnt, k, new_size);
 
@@ -105,16 +107,15 @@ u8* padding(u8* data, u64 len, int* blocks_cnt) {
 
 int sha512(u8* data, u64 len, u64 hash[8]) {
 	int blocks_cnt = 0;
-	u8 data_test[] = { 0x61, 0x62, 0x63 };
 	
-	u8* padded_data = padding(data_test, sizeof(data_test), &blocks_cnt);
+	u8* padded_data = padding(data, len, &blocks_cnt);
 	if (padded_data == NULL) {
 		ERROR_LOG("Failed to pad the data.", kocket_status_str[-blocks_cnt]);
 		return blocks_cnt;
 	}
 
-	for (u64 i = 0; i < (blocks_cnt * BLOCK_SIZE_IN_BYTES / 8ULL); i += 8) {
-		KOCKET_BE_CONVERT(padded_data + i, 8);
+	for (u64 i = 0; i < (blocks_cnt * BLOCK_SIZE_IN_BYTES / 8ULL); ++i) {
+		KOCKET_BE_CONVERT(padded_data + i * 8, 8);
 	}
 	
 	hash[0] = 0x6A09E667F3BCC908;

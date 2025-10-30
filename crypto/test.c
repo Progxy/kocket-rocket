@@ -10,9 +10,10 @@ int main() {
 	int ret = 0;
 	
 	u64 hash[8] = {0};
-	u8 data[] = "Hi mom, I feel well again!";
+	u8 data[] = "abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu";
+	/* "Hi mom, I feel well again!"; */
 	printf("Testing SHA-512:\n");
-	if ((ret = sha512(data, sizeof(data), hash))) {
+	if ((ret = sha512(data, sizeof(data) - 1, hash))) {
 		printf("ERROR::%s: while testing SHA-512.\n", kocket_status_str[-ret]);
 		return ret;
 	}

@@ -29,6 +29,10 @@
 	#define PACKED_STRUCT __attribute__((packed))
 #endif //PACKED_STRUCT
 
+#ifndef UNUSED_FUNCTION
+	#define UNUSED_FUNCTION __attribute__((unused))
+#endif //UNUSED_FUNCTION
+
 #ifndef TRUE
 	#define FALSE 0
 	#define TRUE  1
@@ -106,6 +110,26 @@ typedef u8 bool;
 #ifdef _KOCKET_UTILS_IMPLEMENTATION_
 
 #define HEX_TO_CHR_CAP(val) ((val) > 9 ? (val) + 55 : (val) + '0')
+#define KOCKET_BE_CONVERT(ptr_val, size) kocket_be_to_le(ptr_val, size)
+#if defined(__BYTE_ORDER) && __BYTE_ORDER == __LITTLE_ENDIAN || \
+    defined(__LITTLE_ENDIAN__) || \
+    defined(__ARMEL__) || \
+    defined(__THUMBEL__) || \
+    defined(__AARCH64EL__) || \
+    defined(_MIPSEL) || defined(__MIPSEL) || defined(__MIPSEL__)
+
+	UNUSED_FUNCTION static void kocket_be_to_le(void* ptr_val, size_t size) {
+        for (size_t i = 0; i < size / 2; ++i) {
+            unsigned char temp = KOCKET_CAST_PTR(ptr_val, unsigned char)[i];
+            KOCKET_CAST_PTR(ptr_val, unsigned char)[i] = KOCKET_CAST_PTR(ptr_val, unsigned char)[size - 1 - i];
+            KOCKET_CAST_PTR(ptr_val, unsigned char)[size - 1 - i] = temp;
+        }
+        return;
+    }
+
+#else
+    #define kocket_be_to_le(ptr_val, size)
+#endif // CHECK_ENDIANNESS
 
 static u64 str_len(const char* str) {
 	if (str == NULL) return 0;
