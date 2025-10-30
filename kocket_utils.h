@@ -109,6 +109,8 @@ typedef u8 bool;
 /* -------------------------------------------------------------------------------------------------------- */
 #ifdef _KOCKET_UTILS_IMPLEMENTATION_
 
+#include <stdarg.h>
+
 #define HEX_TO_CHR_CAP(val) ((val) > 9 ? (val) + 55 : (val) + '0')
 #define KOCKET_BE_CONVERT(ptr_val, size) kocket_be_to_le(ptr_val, size)
 #if defined(__BYTE_ORDER) && __BYTE_ORDER == __LITTLE_ENDIAN || \
@@ -173,15 +175,47 @@ static void mem_set_var(void* ptr, int value, size_t size, size_t val_size) {
 	return;
 }
 
-static char* to_hex_str(u8* val, unsigned int size, char* str) {
+static char* to_hex_str(u8* val, unsigned int size, char* str, bool use_space) {
 	unsigned int i = 0;
-    for (unsigned int j = 0; j < size; i += 3, ++j) {
+    for (unsigned int j = 0; j < size; i += 2 + use_space, ++j) {
         str[i] = HEX_TO_CHR_CAP((val[j] >> 4) & 0xF);
         str[i + 1] = HEX_TO_CHR_CAP(val[j] & 0xF);
-		str[i + 2] = ' ';	
+		if (use_space) str[i + 2] = ' ';	
     }
     str[i] = '\0';
     return str;
+}
+
+static u8* concat(u64 len, u64* size, ...) {
+	va_list args;
+    va_start(args, size);
+	
+	for (u64 i = 0; i < len; i += 2) {
+		u8* element = va_arg(args, u8*);	
+		*size += va_arg(args, u64);
+	}
+
+	va_end(args);
+
+	u8* concatenation = calloc(*size, 1);
+	if (concatenation == NULL) {
+		printf("Failed to allocate concatentation buffer.\n");
+		return NULL;
+	}
+    
+	va_start(args, size);
+	
+	u64 current_size = 0;
+	for (u64 i = 0; i < len; i += 2) {
+		u8* element = va_arg(args, u8*);	
+		u64 element_size = va_arg(args, u64);
+		mem_cpy(concatenation + current_size, element, element_size);	
+		current_size += element_size;
+	}
+
+	va_end(args);
+
+	return concatenation;
 }
 
 #endif // _KOCKET_UTILS_IMPLEMENTATION_
@@ -200,6 +234,8 @@ typedef enum KocketStatus {
 	KOCKET_FAILED_LOCK,
 	KOCKET_NO_DATA_RECEIVED,
 	KOCKET_CLOSED_CONNECTION,
+	KOCKET_INVALID_SIGNATURE,
+	KOCKET_INVALID_POINT,
 	KOCKET_TODO 
 } KocketStatus;
 
@@ -215,6 +251,8 @@ static const char* kocket_status_str[] = {
 	"KOCKET_FAILED_LOCK",
 	"KOCKET_NO_DATA_RECEIVED",
 	"KOCKET_CLOSED_CONNECTION",
+	"KOCKET_INVALID_SIGNATURE",
+	"KOCKET_INVALID_POINT",
 	"KOCKET_TODO"
 };
 

@@ -18,15 +18,21 @@
 #ifndef _CHACHA20_H_
 #define _CHACHA20_H_
 
-#ifdef _U_KOCKET_H_
-	#include <time.h>
-	#define kocket_srand() srand(time(NULL))
-	#define kocket_rand    rand
-#else
+#ifdef _K_KOCKET_H_
 	#include <linux/random.h>
 	#define kocket_srand() 
-	#define kocket_rand get_random_u32
-#endif //_U_KOCKET_H_
+	#define kocket_rand get_random_u64
+#else
+	#include <time.h>
+	#define kocket_srand() srand(time(NULL))
+
+	static inline u64 kocket_rand(void) {
+		u32 base = rand();
+	   	u64 upper = rand();
+		return ((upper << 32) | base);
+	}
+
+#endif //_K_KOCKET_H_
 
 // --------
 //  Macros
@@ -43,7 +49,7 @@
 // ------------------------ 
 static inline int is_rdseed_supported(void);
 static inline int is_rdrand_supported(void);
-NO_INLINE static u64 get_rand64(void);
+NO_INLINE static u64 get_rand64(int is_rdrand_supported);
 NO_INLINE static u32 get_seed32(int is_rdseed_supported);
 void cha_cha20_randomize(u8 key[256], u8 nonce[96], u8 random_data[64]);
 u8* cha_cha20(u8 random_data[64]);
@@ -51,48 +57,48 @@ u8* cha_cha20(u8 random_data[64]);
 /* -------------------------------------------------------------------------------------------------------- */
 static inline int is_rdseed_supported(void) {
 	int is_supported = 0; 
+	int cpuid_feature = 7;
+	int sub_cpuid_feature = 0;
 	__asm__ volatile (                          
-		"movl $7, %%eax;"                       
-		"cpuid;"                                
-		"movl %%ebx, %0;"                       
-		: "=r"(is_supported)                    
-		:                                       
-		: "%eax", "%ebx");                      
+		"cpuid\n\t"                                
+		: "=b"(is_supported)     
+		: "a"(cpuid_feature), "c"(sub_cpuid_feature)
+	);      
 	return (is_supported >> 18) & 0x01; 
 }
 
 static inline int is_rdrand_supported(void) {
     int is_supported = 0; 
+	int cpuid_feature = 1;
 	__asm__ volatile (                         
-        "movl $1, %%eax;"                      
-        "cpuid;"                              
-        "movl %%ecx, %0;"                      
-        : "=r"(is_supported)                   
-        :                                      
-        : "%eax", "%ecx");                     
+        "cpuid\n\t"                              
+        : "=c"(is_supported)                   
+        : "a"(cpuid_feature)
+	);                     
     return (is_supported >> 30) & 0x01; 
 }
 
-NO_INLINE static u64 get_rand64(void) {
-    u64 rand = 0;
+NO_INLINE static u64 get_rand64(int is_rdrand_supported) {
+	if (!is_rdrand_supported) return ((u64) kocket_rand());
+	u64 rand = 0;
     __asm__ volatile(
-        "kocket_get_rand:"
-		"rdrand %0;"
-        "jnc kocket_get_rand;"
-        : "=r"(rand)
-        :          );
+        "kocket_get_rand:\n\t"
+		"rdrand %[rand]\n\t"
+        "jnc kocket_get_rand\n\t"
+        : [rand] "=r"(rand)
+	);
     return rand;
 }
 
 NO_INLINE static u32 get_seed32(int is_rdseed_supported) {
-    if (!is_rdseed_supported) return ((u32) get_rand64());
+    if (!is_rdseed_supported) return ((u32) get_rand64(TRUE));
 	u32 seed = 0;
     __asm__ volatile(
-        "kocket_get_seed:"
-        "rdseed %0;"
-        "jnc kocket_get_seed;"
-        : "=r"(seed)
-        :          );
+        "kocket_get_seed:\n\t"
+        "rdseed %[seed]\n\t"
+        "jnc kocket_get_seed\n\t"
+        : [seed] "=r"(seed)
+	);
     return seed;
 }
 
@@ -143,17 +149,12 @@ u8* cha_cha20(u8 random_data[64]) {
         WARNING_LOG("CHACHA20: RDRAND is UNSUPPORTED.");
         if (!is_supported_rdseed) WARNING_LOG("CHACHA20: RDSEED is UNSUPPORTED.");
         kocket_srand();
-		u32 rand_value = kocket_rand();
-		mem_cpy(random_data, &rand_value, sizeof(u32));
-		rand_value = kocket_rand();
-		mem_cpy(random_data + sizeof(u32), &rand_value, sizeof(u32));
-		return random_data;
     } else if (!is_supported_rdseed) {
 		DEBUG_LOG("CHACHA20: RDSEED is UNSUPPORTED.");
 	}
 
 	for (u8 i = 0; i < 64; ++i) {
-		key[i] = get_rand64();
+		key[i] = get_rand64(is_supported_rdrand);
 		if (i < 24) nonce[i] = get_seed32(is_supported_rdseed);
 	}
 

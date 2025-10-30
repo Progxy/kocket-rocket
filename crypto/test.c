@@ -40,7 +40,7 @@ int main() {
 	print_hash((u8*) hash);
 
 	printf("Testing ED25519:\n");
-	if ((ret = ed25519(NULL))) {
+	if ((ret = test_ed25519(NULL, 0))) {
 		printf("ERROR::%s: while testing ED25519.\n", kocket_status_str[-ret]);
 		return ret;
 	}

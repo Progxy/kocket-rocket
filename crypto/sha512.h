@@ -8,6 +8,8 @@
 
 /* Reference: [RFC 6234](https://datatracker.ietf.org/doc/html/rfc6234) */
 
+// TODO: Refactor/Clean the code...
+
 // Constant Values
 #define BLOCK_SIZE 			1024
 #define BLOCK_SIZE_IN_BYTES 128
@@ -51,7 +53,7 @@ static const u64 costants[] = {
 	0x4CC5D4BECB3E42B6, 0x597F299CFC657E2A, 0x5FCB6FAB3AD6FAEC, 0x6C44198C4A475817
 };
 
-void print_hash(u8* hash) {
+static void print_hash(u8* hash) {
 	printf("hash: ");
 	
 	for (unsigned int i = 0; i < 8; ++i) {
@@ -63,7 +65,7 @@ void print_hash(u8* hash) {
 	return;
 }
 
-void print_hexstr(u32* hex_str, u64 size) {
+static void print_hexstr(u32* hex_str, u64 size) {
 	printf("hex_str: \n");
 	
 	for (u64 i = 0; i < size / 4; ++i) {
@@ -76,7 +78,7 @@ void print_hexstr(u32* hex_str, u64 size) {
 	return;
 }
 
-u8* padding(u8* data, u64 len, int* blocks_cnt) {
+static u8* padding(u8* data, u64 len, int* blocks_cnt) {
 	if (data == NULL) {
 		*blocks_cnt = -KOCKET_INVALID_PARAMETERS;
 		return NULL;
