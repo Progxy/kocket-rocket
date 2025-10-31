@@ -7,6 +7,7 @@
 #include "../kocket_utils.h"
 #include "./chacha20.h"
 #include "./sha512.h"
+#include "./chonky_nums.h"
 
 /* Reference: [RFC 8032](https://datatracker.ietf.org/doc/html/rfc8032) */
 
@@ -15,26 +16,6 @@
 typedef u8  Ed25519Key[32];
 typedef u8  Ed25519Signature[64];
 typedef u8* Ed25519Coord;
-
-Ed25519Coord encode_y(Ed25519Key key) {
-	Ed25519Coord y = kocket_calloc(1, sizeof(Ed25519Key)); 
-	if (y == NULL) {
-		printf("Failed to allocate y-coordinate.\n");
-		return NULL;
-	}
-
-	return y;
-}
-
-Ed25519Coord encode_x(Ed25519Key key) {
-	Ed25519Coord x = kocket_calloc(1, sizeof(Ed25519Key)); 
-	if (x == NULL) {
-		printf("Failed to allocate x-coordinate.\n");
-		return NULL;
-	}
-
-	return x;
-}
 
 Ed25519Coord decode_point(Ed25519Key key) {
 	TODO("Implement me!");
@@ -47,30 +28,17 @@ int generate_pub_key(Ed25519Key pub_key, Ed25519Key priv_key) {
 	int err = 0;
 	u8 h[64] = {0};
 
+	// TODO: Maybe needed to convert the sha512 digest back into little endian
 	if ((err = sha512(priv_key, sizeof(Ed25519Key), (u64*) h))) return err;
 
 	// Prune the buffer
 	h[0] &= ~(0x07);
 	h[31] &= ~(0x80);
 	h[31] |= 0x40;
-
+	
 	mem_cpy(pub_key, h, sizeof(Ed25519Key));
-
-	Ed25519Key sb = pub_key * priv_key;
-
-	Ed25519Coord y_encoding = encode_y(sb);
-	if (y_encoding == NULL) return -KOCKET_IO_ERROR;
 	
-	y_encoding[31] &= ~(0x80);
-	
-	Ed25519Coord x_encoding = encode_x(sb);
-	if (x_encoding == NULL) return -KOCKET_IO_ERROR;
-	
-	mem_cpy(pub_key, y_encoding, sizeof(Ed25519Key));
-	pub_key[31] &= ~((x_encoding[0] & 0x01) << 7);
-	
-	KOCKET_SAFE_FREE(x_encoding);
-	KOCKET_SAFE_FREE(y_encoding);
+	encode_point(pub_key, mul_point(pub_key, G), TRUE);
 
 	return KOCKET_NO_ERROR;
 }
