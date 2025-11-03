@@ -65,7 +65,7 @@ static void print_hash(u8* hash) {
 	return;
 }
 
-static void print_hexstr(u32* hex_str, u64 size) {
+UNUSED_FUNCTION static void print_hexstr(u32* hex_str, u64 size) {
 	printf("hex_str: \n");
 	
 	for (u64 i = 0; i < size / 4; ++i) {

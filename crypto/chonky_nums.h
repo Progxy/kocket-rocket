@@ -1,13 +1,11 @@
 #ifndef _CHONKY_NUMS_H_
 #define _CHONKY_NUMS_H_
 
+#define MIN(a, b) ((a) >= (b) ? (b) : (a))
 #define GET_SCALAR_BIT(val, n) ((((val).data[(((n) - ((n) % 8)) / 8)]) >> ((n) % 8)) & 0x01)
 
 typedef struct {
-	union {
-		u8 data[32];
-		u8 ext_data[64];
-	};
+	u8 data[64];
 } Ed25519Scalar;
 
 typedef struct Ed25519Coord {
@@ -101,6 +99,14 @@ static const Ed25519Scalar two = {
 	}
 };
 
+static const Ed25519Scalar eight = {
+	.data = {
+		0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+	}
+};
+
 static const Ed25519Scalar decoding_exp = {
 	.data = {
 		0xFD, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
@@ -123,6 +129,16 @@ static Ed25519TempScalar* head_scalar = NULL;
 static Ed25519TempScalar* curr_scalar = NULL;
 
 /* NOTE: Unless explicitly said each operation is performed modulo p */
+
+void ed25519_clean_temp(void) {
+	while (head_scalar != NULL) {
+		Ed25519TempScalar* prev_scalar = head_scalar;
+		KOCKET_SAFE_FREE(prev_scalar);
+		head_scalar = head_scalar -> next;
+	}
+	curr_scalar = NULL;
+	return;
+}
 
 // TODO: Pass int for err handling
 Ed25519Scalar ed25519_add(Ed25519Scalar a, Ed25519Scalar b) {
@@ -227,9 +243,9 @@ Ed25519Scalar ed25519_spow(Ed25519Scalar a, Ed25519Scalar exp) {
 	return temp_scalar -> value;
 }
 
-Ed25519Scalar ptr_to_scalar(u8* ptr) {
+Ed25519Scalar ptr_to_scalar(u8* ptr, u64 size) {
 	Ed25519Scalar ext_scalar = {0};
-	mem_cpy(ext_scalar.data, ptr, sizeof(Ed25519Scalar));
+	mem_cpy(ext_scalar.data, ptr, MIN(size, sizeof(Ed25519Scalar)));
 	return ext_scalar;
 }
 
@@ -273,19 +289,36 @@ bool ed25519_is_gt(Ed25519Scalar a, Ed25519Scalar b) {
 	return FALSE;
 }
 
-void ed25519_clean_temp(void) {
-	while (head_scalar != NULL) {
-		Ed25519TempScalar* prev_scalar = head_scalar;
-		KOCKET_SAFE_FREE(prev_scalar);
-		head_scalar = head_scalar -> next;
+bool ed25519_is_gt_eq(Ed25519Scalar a, Ed25519Scalar b) {
+	TODO("Implement me!");
+	return FALSE;
+}
+
+bool is_point_eq(Ed25519Point* a, Ed25519Point* b) {
+	TODO("Implement me!");
+	return FALSE;
+}
+
+Ed25519Point* coord_to_point(Ed25519Coord* coord) {
+	Ed25519Point* point = calloc(1, sizeof(Ed25519Point));
+	if (point == NULL) {
+		WARNING_LOG("Failed to allocate neutral point buffer.");
+		return NULL;
 	}
-	curr_scalar = NULL;
-	return;
+
+	mem_cpy((point -> x).data, (coord -> x).data, sizeof(Ed25519Scalar));
+	mem_cpy((point -> y).data, (coord -> y).data, sizeof(Ed25519Scalar));
+	(point -> z).data[0] = 1;
+	mem_cpy((point -> t).data, ed25519_mul(coord -> x, coord -> y).data, sizeof(Ed25519Scalar));
+	
+	ed25519_clean_temp();
+
+	return point;
 }
 
 // TODO: Is clear that we trade between code elegance and clarity with a bit of
 // memory cost (perhaps even performance overhead?), as we use temp variables
-Ed25519Point* point_add(Ed25519Point* point_a, Ed25519Point* point_b, bool same_point) {
+Ed25519Point* add_point(Ed25519Point* point_a, Ed25519Point* point_b, bool same_point) {
 	Ed25519Scalar A = ed25519_mul(ed25519_sub(point_a -> y, point_a -> x), ed25519_sub(point_b -> y, point_b -> x));
 	Ed25519Scalar B = ed25519_mul(ed25519_add(point_a -> y, point_a -> x), ed25519_add(point_b -> y, point_b -> x));
 	Ed25519Scalar C = ed25519_mul(ed25519_mul(ed25519_mul(point_a -> t, two), d), point_b -> t);
@@ -323,7 +356,7 @@ Ed25519Point* point_add(Ed25519Point* point_a, Ed25519Point* point_b, bool same_
 	return point;
 }
 
-Ed25519Point* point_double(Ed25519Point* point, bool same_point) {
+Ed25519Point* double_point(Ed25519Point* point, bool same_point) {
 	Ed25519Scalar A = ed25519_pow(point -> x, 2);
 	Ed25519Scalar B = ed25519_pow(point -> y, 2);
 	Ed25519Scalar C = ed25519_mul(ed25519_pow(point -> z, 2), two);
@@ -376,8 +409,8 @@ Ed25519Point* neutral_point(void) {
 Ed25519Point* mul_point(Ed25519Scalar scalar, Ed25519Point* P) {
 	Ed25519Point* R = neutral_point(); 	
 	for (int i = 254; i >= 0; --i) {
-    	R = point_double(R, TRUE);
-    	if (GET_SCALAR_BIT(scalar, i)) R = point_add(R, P, TRUE);
+    	R = double_point(R, TRUE);
+    	if (GET_SCALAR_BIT(scalar, i)) R = add_point(R, P, TRUE);
 	}
 	return R;
 }
