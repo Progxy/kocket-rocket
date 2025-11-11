@@ -81,7 +81,7 @@
 			#define DEBUG_LOG(format, ...)
 		#endif //_DEBUG	
 	
-		#define TODO(format, ...)            printf(COLOR_STR("TODO:" __FILE__ ":%u: ", TODO_COLOR) format "\n", __LINE__, ##__VA_ARGS__)
+		#define TODO(format, ...)            printf(COLOR_STR("TODO:" __FILE__ ":%u: ", TODO_COLOR) COLOR_STR("function %s: ", PURPLE) format "\n", __LINE__, __func__, ##__VA_ARGS__)
 
 	#endif //_K_KOCKET_H_
 
@@ -90,7 +90,9 @@
 /* -------------------------------------------------------------------------------------------------------- */
 #ifdef _KOCKET_SPECIAL_TYPE_SUPPORT_
 
-#define STATIC_ASSERT          _Static_assert
+#define STATIC_ASSERT _Static_assert
+
+typedef unsigned char bool;
 
 typedef unsigned char      u8;
 typedef unsigned short     u16;
@@ -102,7 +104,15 @@ STATIC_ASSERT(sizeof(u16)  == 2,  "u16 must be 2 bytes");
 STATIC_ASSERT(sizeof(u32)  == 4,  "u32 must be 4 bytes");
 STATIC_ASSERT(sizeof(u64)  == 8,  "u64 must be 8 bytes");
 
-typedef u8 bool;
+typedef char          s8;
+typedef short int     s16;
+typedef int           s32;
+typedef long long int s64;
+
+STATIC_ASSERT(sizeof(s8)   == 1,  "s8 must be 1 byte");
+STATIC_ASSERT(sizeof(s16)  == 2,  "s16 must be 2 bytes");
+STATIC_ASSERT(sizeof(s32)  == 4,  "s32 must be 4 bytes");
+STATIC_ASSERT(sizeof(s64)  == 8,  "s64 must be 8 bytes");
 
 #endif //_KOCKET_SPECIAL_TYPE_SUPPORT_
 
@@ -111,6 +121,7 @@ typedef u8 bool;
 
 #include <stdarg.h>
 
+#define GET_BIT(val, bit_pos) ((val) >> (bit_pos))
 #define HEX_TO_CHR_CAP(val) ((val) > 9 ? (val) + 55 : (val) + '0')
 #define KOCKET_BE_CONVERT(ptr_val, size) kocket_be_to_le(ptr_val, size)
 #if defined(__BYTE_ORDER) && __BYTE_ORDER == __LITTLE_ENDIAN || \
@@ -133,14 +144,23 @@ typedef u8 bool;
     #define kocket_be_to_le(ptr_val, size)
 #endif // CHECK_ENDIANNESS
 
-static u64 str_len(const char* str) {
+UNUSED_FUNCTION static u64 str_len(const char* str) {
 	if (str == NULL) return 0;
 	u64 i = 0;
 	while (*str++) ++i;
 	return i;
 }
 
-static void mem_move(void* dest, const void* src, size_t size) {
+UNUSED_FUNCTION static u8 bit_size(u8 val) {
+	u8 size = 8;
+	for (u8 i = 0; i < 8; ++i) {
+		if (GET_BIT(val, i)) break;
+		size--;
+	}
+	return size;
+}
+
+UNUSED_FUNCTION static void mem_move(void* dest, const void* src, size_t size) {
     if (dest == NULL || src == NULL || size == 0) return;
     
 	unsigned char* temp = (unsigned char*) kocket_calloc(size, sizeof(unsigned char));
@@ -192,6 +212,7 @@ static u8* concat(u64 len, u64* size, ...) {
 	
 	for (u64 i = 0; i < len; i += 2) {
 		u8* element = va_arg(args, u8*);	
+		(void) element;
 		*size += va_arg(args, u64);
 	}
 

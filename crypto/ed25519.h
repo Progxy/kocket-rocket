@@ -7,7 +7,7 @@
 #include "../kocket_utils.h"
 #include "./chacha20.h"
 #include "./sha512.h"
-#include "./chonky_nums.h"
+#include "./ecm_ops.h"
 
 /* Reference: [RFC 8032](https://datatracker.ietf.org/doc/html/rfc8032) */
 
@@ -37,7 +37,7 @@ int generate_pub_key(Ed25519Key pub_key, Ed25519Key priv_key) {
 	
 	mem_cpy(pub_key, h, sizeof(Ed25519Key));
 	
-	compress_point(ptr_to_scalar(pub_key, sizeof(Ed25519Key)), mul_point(ptr_to_scalar(pub_key, sizeof(Ed25519Key)), (Ed25519Point*) &base_point), TRUE);
+	compress_point(ptr_to_scalar(pub_key, sizeof(Ed25519Key)), mul_point(ptr_to_scalar(pub_key, sizeof(Ed25519Key)), (ECMPoint*) &base_point), TRUE);
 
 	return KOCKET_NO_ERROR;
 }
@@ -54,9 +54,9 @@ int sign(Ed25519Signature signature, Ed25519Key priv_key, Ed25519Key pub_key, u8
 	if ((err = sha512(data, len, (u64*) hashed_data))) return err;
 	
 	// For efficiency, do this by first reducing r modulo L, the group order of B.
-	Ed25519Scalar hashed_data_scalar = ed25519_mod(ptr_to_scalar(hashed_data, sizeof(hashed_data)), L);
-	Ed25519Scalar R = { 0 };
-	compress_point(R, mul_point(hashed_data_scalar, (Ed25519Point*) &base_point), TRUE);
+	ECMScalar hashed_data_scalar = ecm_mod(ptr_to_scalar(hashed_data, sizeof(hashed_data)), L);
+	ECMScalar R = { 0 };
+	compress_point(R, mul_point(hashed_data_scalar, (ECMPoint*) &base_point), TRUE);
 
 	u64 K_len = 0;
 	// TODO: Find a way to macro function calculate the count of parameters
@@ -67,8 +67,8 @@ int sign(Ed25519Signature signature, Ed25519Key priv_key, Ed25519Key pub_key, u8
 	if ((err = sha512(K, K_len, (u64*) k))) return err;
 
 	// For efficiency, again reduce k modulo L first.
-	Ed25519Scalar k_scalar = ed25519_mod(ptr_to_scalar(k, sizeof(k)),L);
-	Ed25519Scalar S = ed25519_mod(ed25519_add(hashed_data_scalar, ed25519_mul(k_scalar, ptr_to_scalar(priv_key, sizeof(Ed25519Key)))), L);
+	ECMScalar k_scalar = ecm_mod(ptr_to_scalar(k, sizeof(k)),L);
+	ECMScalar S = ecm_mod(ecm_add(hashed_data_scalar, ecm_mul(k_scalar, ptr_to_scalar(priv_key, sizeof(Ed25519Key)))), L);
 
 	mem_cpy(signature, S.data, sizeof(Ed25519Key));
 	mem_cpy(signature + sizeof(Ed25519Key), R.data, sizeof(Ed25519Key));
@@ -79,20 +79,20 @@ int sign(Ed25519Signature signature, Ed25519Key priv_key, Ed25519Key pub_key, u8
 int verify_signature(Ed25519Key pub_key, Ed25519Signature signature, u8* data, u64 len) {
 	if (data == NULL || len == 0 || signature == NULL) return -KOCKET_INVALID_PARAMETERS;
 	
-	Ed25519Scalar R = {0};
-	Ed25519Scalar S = {0};
-	mem_cpy(R.data, signature, sizeof(Ed25519Scalar));
-	mem_cpy(S.data, signature + sizeof(Ed25519Scalar), sizeof(Ed25519Scalar));
+	ECMScalar R = {0};
+	ECMScalar S = {0};
+	mem_cpy(R.data, signature, sizeof(ECMScalar));
+	mem_cpy(S.data, signature + sizeof(ECMScalar), sizeof(ECMScalar));
 	
-	if (ed25519_is_gt_eq(S, L)) {
+	if (ecm_is_gt_eq(S, L)) {
 		WARNING_LOG("Failed to decode the signature as: S >= L");
 		return -KOCKET_INVALID_SIGNATURE;
 	}
 
-	Ed25519Coord* decoded_r = decode_point(R);
+	ECMCoord* decoded_r = decode_point(R);
 	if (decoded_r == NULL) return -KOCKET_INVALID_SIGNATURE;
 
-	Ed25519Coord* decoded_A = decode_point(ptr_to_scalar(pub_key, sizeof(Ed25519Key)));
+	ECMCoord* decoded_A = decode_point(ptr_to_scalar(pub_key, sizeof(Ed25519Key)));
 	if (decoded_A == NULL) return -KOCKET_INVALID_SIGNATURE;
 	
 	int err = 0;
@@ -105,9 +105,9 @@ int verify_signature(Ed25519Key pub_key, Ed25519Signature signature, u8* data, u
 	if ((err = sha512(K, K_len, (u64*) k))) return err;
 
 	// Check the group equation.  
-	Ed25519Point* S_B = mul_point(eight, mul_point(S, (Ed25519Point*) &base_point));
-	Ed25519Point* k_A = mul_point(eight, mul_point(ptr_to_scalar(k, sizeof(k)), coord_to_point(decoded_A)));
-   	Ed25519Point* R_k_A = add_point(mul_point(eight, coord_to_point(decoded_r)), k_A, FALSE);
+	ECMPoint* S_B = mul_point(eight, mul_point(S, (ECMPoint*) &base_point));
+	ECMPoint* k_A = mul_point(eight, mul_point(ptr_to_scalar(k, sizeof(k)), coord_to_point(decoded_A)));
+   	ECMPoint* R_k_A = add_point(mul_point(eight, coord_to_point(decoded_r)), k_A, FALSE);
 
 	if (!is_point_eq(S_B, R_k_A)) {
 		KOCKET_SAFE_FREE(S_B);
@@ -126,12 +126,48 @@ int verify_signature(Ed25519Key pub_key, Ed25519Signature signature, u8* data, u
 int test_ed25519(u8* data, u64 len) {
 	int err = 0;
 	char temp_str[1024] = {0};
+	char temp_str_A[1024] = {0};
+	char temp_str_B[1024] = {0};
+	char temp_str_C[1024] = {0};
 	
 	Ed25519Key priv_key = {0};
 	generate_priv_key(priv_key);
 	
-	printf("Private Key: %s\n", to_hex_str(priv_key, sizeof(priv_key), temp_str, FALSE));
+	printf("Private Key: %s\n", to_hex_str(priv_key, sizeof(Ed25519Key), temp_str, FALSE));
 	mem_set(temp_str, 0, 1024);
+	
+	ECMScalar A = { .data = {
+			0x0D, 0x00, 0x00, 0x00,
+			0x0E, 0x00, 0x00, 0x00,
+			0x0F, 0x00, 0x00, 0x00,
+			0x10, 0x00, 0x00, 0x00,
+			0x0D, 0x00, 0x00, 0x00,
+			0x0E, 0x00, 0x00, 0x00,
+			0x0F, 0x00, 0x00, 0x00,
+			0x10, 0x00, 0x00, 0x00
+		}
+	};
+
+	ECMScalar B = { .data = {
+			0x04, 0x00, 0x00, 0x00,
+			0x03, 0x00, 0x00, 0x00,
+			0x02, 0x00, 0x00, 0x00,
+			0x01, 0x00, 0x00, 0x00,
+			0x04, 0x00, 0x00, 0x00,
+			0x03, 0x00, 0x00, 0x00,
+			0x02, 0x00, 0x00, 0x00,
+			0x01, 0x00, 0x00, 0x00
+		}
+	};	
+	ECMScalar C = ecm_add(A, B);
+
+	printf("A: %s\n", to_hex_str(A.data, sizeof(ECMScalar), temp_str_A, TRUE));
+	printf("B: %s\n", to_hex_str(B.data, sizeof(ECMScalar), temp_str_B, TRUE));
+	printf("C: %s\n", to_hex_str(C.data, sizeof(ECMScalar), temp_str_C, TRUE));
+	
+	ecm_clean_temp();
+		
+	return KOCKET_NO_ERROR;
 
 	Ed25519Key pub_key = {0};
 	if ((err = generate_pub_key(pub_key, priv_key))) {
@@ -139,7 +175,7 @@ int test_ed25519(u8* data, u64 len) {
 		return err;
 	}
 	
-	printf("Public Key: %s\n", to_hex_str(pub_key, sizeof(pub_key), temp_str, FALSE));
+	printf("Public Key: %s\n", to_hex_str(pub_key, sizeof(Ed25519Key), temp_str, FALSE));
 	mem_set(temp_str, 0, 1024);
 
 	Ed25519Signature signature = {0};
@@ -148,7 +184,7 @@ int test_ed25519(u8* data, u64 len) {
 		return err;
 	}
 
-	printf("Signature: %s\n", to_hex_str(signature, sizeof(signature), temp_str, FALSE));
+	printf("Signature: %s\n", to_hex_str(signature, sizeof(Ed25519Signature), temp_str, FALSE));
 	mem_set(temp_str, 0, 1024);
 	
 	if (verify_signature(pub_key, signature, data, len)) {
