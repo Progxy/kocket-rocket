@@ -1,13 +1,22 @@
 #ifndef _ECM_OPS_H_
 #define _ECM_OPS_H_
 
-#define _CHONKY_NUMS_SPECIAL_TYPE_SUPPORT_
+#define CHONKY_ASSERT(cond) __ecm_assert(cond, #cond, __FILE__, __LINE__, __func__)
+
+static void __ecm_assert(bool cond, const char* cond_str, const char* file, const unsigned int line, const char* func_name) {
+	if (!cond) {
+		WARNING_LOG(COLOR_STR("%s:%u: ", WARNING_COLOR) "Failed to assert the following condition: " COLOR_STR("'%s'", BLUE) " in function " COLOR_STR("'%s'", PURPLE), file, line, cond_str, func_name);
+	}
+	return;
+}
+
 #include "../deps/chonky_nums.h"
 
 #define GET_SCALAR_BIT(val, n) ((((val).data[(((n) - ((n) % 8)) / 8)]) >> ((n) % 8)) & 0x01)
 
+#define SCALAR_SIZE 64
 typedef struct {
-	u8 data[64];
+	u8 data[SCALAR_SIZE];
 } ECMScalar;
 
 typedef struct ECMCoord {
@@ -135,6 +144,7 @@ static ECMTempScalar* curr_scalar = NULL;
 void ecm_clean_temp(void) {
 	while (head_scalar != NULL) {
 		ECMTempScalar* prev_scalar = head_scalar;
+		DEBUG_LOG("Deallocating: %p", (void*) prev_scalar);
 		KOCKET_SAFE_FREE(prev_scalar);
 		head_scalar = head_scalar -> next;
 	}
@@ -145,6 +155,11 @@ void ecm_clean_temp(void) {
 // TODO: Pass int for err handling
 // TODO: Find a way to maintain the sugar syntax, while performing error
 //       handling (and maybe possibly also avoid repetitive temp allocations)
+
+// URGENT!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+// TODO: There are clearly some problems with using simply the data from
+// ECMScalar, therefore should use the alloc_chonky_num to correctly perform
+// the operation with chonky nums and then simply mem_cpy the results
 ECMScalar ecm_add(ECMScalar a, ECMScalar b) {
 	ECMTempScalar* temp_scalar = calloc(1, sizeof(ECMTempScalar));
 	if (temp_scalar == NULL) {
@@ -157,8 +172,16 @@ ECMScalar ecm_add(ECMScalar a, ECMScalar b) {
 	else curr_scalar -> next = temp_scalar;
 
 	curr_scalar = temp_scalar;
+	DEBUG_LOG("Allocating: %p", (void*) temp_scalar);
 
-	// chonky_mod_mersenne(p)
+	BigNum a_num = POS_STATIC_BIG_NUM(a.data, SCALAR_SIZE);
+	BigNum b_num = POS_STATIC_BIG_NUM(b.data, SCALAR_SIZE);
+	BigNum p_num = POS_STATIC_BIG_NUM(p.data, SCALAR_SIZE);
+	BigNum res   = POS_STATIC_BIG_NUM((temp_scalar -> value).data, SCALAR_SIZE);
+
+	__chonky_add(&res, &a_num, &b_num);
+	
+	if (__chonky_mod_mersenne(&res, &res, &p_num) == NULL) return invalid_scalar;
 
 	return temp_scalar -> value;
 }
@@ -175,8 +198,16 @@ ECMScalar ecm_sub(ECMScalar a, ECMScalar b) {
 	else curr_scalar -> next = temp_scalar;
 
 	curr_scalar = temp_scalar;
+	DEBUG_LOG("Allocating: %p", (void*) temp_scalar);
 	
-	// ecm_mod(p)
+	BigNum a_num = POS_STATIC_BIG_NUM(a.data, SCALAR_SIZE);
+	BigNum b_num = STATIC_BIG_NUM(b.data, SCALAR_SIZE, 1);
+	BigNum p_num = POS_STATIC_BIG_NUM(p.data, SCALAR_SIZE);
+	BigNum res   = POS_STATIC_BIG_NUM((temp_scalar -> value).data, SCALAR_SIZE);
+
+	__chonky_add(&res, &a_num, &b_num);
+	
+	if (__chonky_mod_mersenne(&res, &res, &p_num) == NULL) return invalid_scalar;
 
 	return temp_scalar -> value;
 }
@@ -193,8 +224,18 @@ ECMScalar ecm_mul(ECMScalar a, ECMScalar b) {
 	else curr_scalar -> next = temp_scalar;
 
 	curr_scalar = temp_scalar;
+	DEBUG_LOG("Allocating: %p", (void*) temp_scalar);
 
-	TODO("Implement me!");
+	u8* temp_data[SCALAR_SIZE * 2 + 8] = {0};
+	BigNum a_num   = POS_STATIC_BIG_NUM(a.data, SCALAR_SIZE);
+	BigNum b_num   = POS_STATIC_BIG_NUM(b.data, SCALAR_SIZE);
+	BigNum p_num   = POS_STATIC_BIG_NUM(p.data, SCALAR_SIZE);
+	BigNum res     = POS_STATIC_BIG_NUM(temp_data, SCALAR_SIZE * 2 + 8);
+	BigNum res_num = POS_STATIC_BIG_NUM((temp_scalar -> value).data, SCALAR_SIZE);
+
+	if (__chonky_mul_s(&res, &a_num, &b_num) == NULL) return invalid_scalar;
+	if (__chonky_mod_mersenne(&res_num, &res, &p_num) == NULL) return invalid_scalar;
+
 	return temp_scalar -> value;
 }
 
@@ -210,8 +251,15 @@ ECMScalar ecm_spow(ECMScalar a, ECMScalar exp) {
 	else curr_scalar -> next = temp_scalar;
 
 	curr_scalar = temp_scalar;
+	DEBUG_LOG("Allocating: %p", (void*) temp_scalar);
+	
+	BigNum a_num   = POS_STATIC_BIG_NUM(a.data, SCALAR_SIZE);
+	BigNum p_num   = POS_STATIC_BIG_NUM(p.data, SCALAR_SIZE);
+	BigNum exp_num = POS_STATIC_BIG_NUM(exp.data, SCALAR_SIZE);
+	BigNum res     = POS_STATIC_BIG_NUM((temp_scalar -> value).data, SCALAR_SIZE);
 
-	TODO("Implement me!");
+	if (__chonky_pow_mod_mersenne(&res, &a_num, &exp_num, &p_num) == NULL) return invalid_scalar;
+
 	return temp_scalar -> value;
 }
 
@@ -227,8 +275,15 @@ ECMScalar ecm_pow(ECMScalar a, u64 exp) {
 	else curr_scalar -> next = temp_scalar;
 
 	curr_scalar = temp_scalar;
+	DEBUG_LOG("Allocating: %p", (void*) temp_scalar);
 
-	TODO("Implement me!");
+	BigNum a_num   = POS_STATIC_BIG_NUM(a.data, SCALAR_SIZE);
+	BigNum p_num   = POS_STATIC_BIG_NUM(p.data, SCALAR_SIZE);
+	BigNum exp_num = POS_STATIC_BIG_NUM(&exp, 8);
+	BigNum res     = POS_STATIC_BIG_NUM((temp_scalar -> value).data, SCALAR_SIZE);
+
+	if (__chonky_pow_mod_mersenne(&res, &a_num, &exp_num, &p_num) == NULL) return invalid_scalar;
+	
 	return temp_scalar -> value;
 }
 
@@ -238,7 +293,7 @@ ECMScalar ptr_to_scalar(u8* ptr, u64 size) {
 	return ext_scalar;
 }
 
-ECMScalar ecm_mod(ECMScalar a, ECMScalar exp) {
+ECMScalar ecm_mod(ECMScalar a, ECMScalar mod_base) {
 	ECMTempScalar* temp_scalar = calloc(1, sizeof(ECMTempScalar));
 	if (temp_scalar == NULL) {
 		WARNING_LOG("Failed to allocate scalar buffer.");
@@ -250,8 +305,14 @@ ECMScalar ecm_mod(ECMScalar a, ECMScalar exp) {
 	else curr_scalar -> next = temp_scalar;
 
 	curr_scalar = temp_scalar;
+	DEBUG_LOG("Allocating: %p", (void*) temp_scalar);
 
-	TODO("Implement me!");
+	BigNum a_num        = POS_STATIC_BIG_NUM(a.data, SCALAR_SIZE);
+	BigNum mod_base_num = POS_STATIC_BIG_NUM(mod_base.data, SCALAR_SIZE);
+	BigNum res          = POS_STATIC_BIG_NUM(temp_scalar -> value.data, SCALAR_SIZE);
+
+	if (__chonky_mod(&res, &a_num, &mod_base_num) == NULL) return invalid_scalar;
+	
 	return temp_scalar -> value;
 }
 
@@ -307,7 +368,7 @@ ECMPoint* coord_to_point(ECMCoord* coord) {
 
 	mem_cpy((point -> x).data, (coord -> x).data, sizeof(ECMScalar));
 	mem_cpy((point -> y).data, (coord -> y).data, sizeof(ECMScalar));
-	(point -> z).data[0] = 1;
+	((point -> z).data)[0] = 1;
 	mem_cpy((point -> t).data, ecm_mul(coord -> x, coord -> y).data, sizeof(ECMScalar));
 	
 	ecm_clean_temp();
@@ -328,10 +389,10 @@ ECMPoint* add_point(ECMPoint* point_a, ECMPoint* point_b, bool same_point) {
 	ECMScalar H = ecm_add(B, A);
 
 	if (same_point) {
-		mem_cpy(point_a -> x.data, ecm_mul(E, F).data, sizeof(ECMScalar));
-		mem_cpy(point_a -> y.data, ecm_mul(G, H).data, sizeof(ECMScalar));
-		mem_cpy(point_a -> t.data, ecm_mul(E, H).data, sizeof(ECMScalar));
-		mem_cpy(point_a -> z.data, ecm_mul(F, G).data, sizeof(ECMScalar));
+		mem_cpy((point_a -> x).data, ecm_mul(E, F).data, sizeof(ECMScalar));
+		mem_cpy((point_a -> y).data, ecm_mul(G, H).data, sizeof(ECMScalar));
+		mem_cpy((point_a -> t).data, ecm_mul(E, H).data, sizeof(ECMScalar));
+		mem_cpy((point_a -> z).data, ecm_mul(F, G).data, sizeof(ECMScalar));
 		
 		ecm_clean_temp();
 		
@@ -345,10 +406,10 @@ ECMPoint* add_point(ECMPoint* point_a, ECMPoint* point_b, bool same_point) {
 		return NULL;
 	}
 
-	mem_cpy(point -> x.data, ecm_mul(E, F).data, sizeof(ECMScalar));
-	mem_cpy(point -> y.data, ecm_mul(G, H).data, sizeof(ECMScalar));
-	mem_cpy(point -> t.data, ecm_mul(E, H).data, sizeof(ECMScalar));
-	mem_cpy(point -> z.data, ecm_mul(F, G).data, sizeof(ECMScalar));
+	mem_cpy((point -> x).data, ecm_mul(E, F).data, sizeof(ECMScalar));
+	mem_cpy((point -> y).data, ecm_mul(G, H).data, sizeof(ECMScalar));
+	mem_cpy((point -> t).data, ecm_mul(E, H).data, sizeof(ECMScalar));
+	mem_cpy((point -> z).data, ecm_mul(F, G).data, sizeof(ECMScalar));
 	
 	ecm_clean_temp();
 	
@@ -365,11 +426,12 @@ ECMPoint* double_point(ECMPoint* point, bool same_point) {
 	ECMScalar F = ecm_add(C, G);
 	
 	if (same_point) {
-		mem_cpy(point -> x.data, ecm_mul(E, F).data, sizeof(ECMScalar));
-		mem_cpy(point -> y.data, ecm_mul(G, H).data, sizeof(ECMScalar));
-		mem_cpy(point -> t.data, ecm_mul(E, H).data, sizeof(ECMScalar));
-		mem_cpy(point -> z.data, ecm_mul(F, G).data, sizeof(ECMScalar));
+		mem_cpy((point -> x).data, ecm_mul(E, F).data, sizeof(ECMScalar));
+		mem_cpy((point -> y).data, ecm_mul(G, H).data, sizeof(ECMScalar));
+		mem_cpy((point -> t).data, ecm_mul(E, H).data, sizeof(ECMScalar));
+		mem_cpy((point -> z).data, ecm_mul(F, G).data, sizeof(ECMScalar));
 		
+		DEBUG_LOG("Cleaning, from double point internal");
 		ecm_clean_temp();
 	}
 	
@@ -380,11 +442,12 @@ ECMPoint* double_point(ECMPoint* point, bool same_point) {
 		return NULL;
 	}
 
-	mem_cpy(res_point -> x.data, ecm_mul(E, F).data, sizeof(ECMScalar));
-	mem_cpy(res_point -> y.data, ecm_mul(G, H).data, sizeof(ECMScalar));
-	mem_cpy(res_point -> t.data, ecm_mul(E, H).data, sizeof(ECMScalar));
-	mem_cpy(res_point -> z.data, ecm_mul(F, G).data, sizeof(ECMScalar));
+	mem_cpy((res_point -> x).data, ecm_mul(E, F).data, sizeof(ECMScalar));
+	mem_cpy((res_point -> y).data, ecm_mul(G, H).data, sizeof(ECMScalar));
+	mem_cpy((res_point -> t).data, ecm_mul(E, H).data, sizeof(ECMScalar));
+	mem_cpy((res_point -> z).data, ecm_mul(F, G).data, sizeof(ECMScalar));
 		
+	DEBUG_LOG("Cleaning, from double point");
 	ecm_clean_temp();
 
 	return res_point;
@@ -474,8 +537,8 @@ ECMCoord* decode_point(ECMScalar scalar) {
 		return NULL;
 	}
 
-	mem_cpy(coord -> x.data, x.data, sizeof(ECMScalar));
-	mem_cpy(coord -> y.data, y.data, sizeof(ECMScalar));
+	mem_cpy((coord -> x).data, x.data, sizeof(ECMScalar));
+	mem_cpy((coord -> y).data, y.data, sizeof(ECMScalar));
 
 	// Clean only after copying as x and y are temp scalars
 	ecm_clean_temp();

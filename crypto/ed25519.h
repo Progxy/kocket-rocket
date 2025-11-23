@@ -126,48 +126,11 @@ int verify_signature(Ed25519Key pub_key, Ed25519Signature signature, u8* data, u
 int test_ed25519(u8* data, u64 len) {
 	int err = 0;
 	char temp_str[1024] = {0};
-	char temp_str_A[1024] = {0};
-	char temp_str_B[1024] = {0};
-	char temp_str_C[1024] = {0};
-	
 	Ed25519Key priv_key = {0};
 	generate_priv_key(priv_key);
 	
 	printf("Private Key: %s\n", to_hex_str(priv_key, sizeof(Ed25519Key), temp_str, FALSE));
 	mem_set(temp_str, 0, 1024);
-	
-	ECMScalar A = { .data = {
-			0x0D, 0x00, 0x00, 0x00,
-			0x0E, 0x00, 0x00, 0x00,
-			0x0F, 0x00, 0x00, 0x00,
-			0x10, 0x00, 0x00, 0x00,
-			0x0D, 0x00, 0x00, 0x00,
-			0x0E, 0x00, 0x00, 0x00,
-			0x0F, 0x00, 0x00, 0x00,
-			0x10, 0x00, 0x00, 0x00
-		}
-	};
-
-	ECMScalar B = { .data = {
-			0x04, 0x00, 0x00, 0x00,
-			0x03, 0x00, 0x00, 0x00,
-			0x02, 0x00, 0x00, 0x00,
-			0x01, 0x00, 0x00, 0x00,
-			0x04, 0x00, 0x00, 0x00,
-			0x03, 0x00, 0x00, 0x00,
-			0x02, 0x00, 0x00, 0x00,
-			0x01, 0x00, 0x00, 0x00
-		}
-	};	
-	ECMScalar C = ecm_add(A, B);
-
-	printf("A: %s\n", to_hex_str(A.data, sizeof(ECMScalar), temp_str_A, TRUE));
-	printf("B: %s\n", to_hex_str(B.data, sizeof(ECMScalar), temp_str_B, TRUE));
-	printf("C: %s\n", to_hex_str(C.data, sizeof(ECMScalar), temp_str_C, TRUE));
-	
-	ecm_clean_temp();
-		
-	return KOCKET_NO_ERROR;
 
 	Ed25519Key pub_key = {0};
 	if ((err = generate_pub_key(pub_key, priv_key))) {

@@ -114,14 +114,26 @@ STATIC_ASSERT(sizeof(s16)  == 2,  "s16 must be 2 bytes");
 STATIC_ASSERT(sizeof(s32)  == 4,  "s32 must be 4 bytes");
 STATIC_ASSERT(sizeof(s64)  == 8,  "s64 must be 8 bytes");
 
+#ifdef __SIZEOF_INT128__
+	__extension__ typedef unsigned __int128 u128;
+	__extension__ typedef          __int128 s128;
+
+	STATIC_ASSERT(sizeof(u128) == 16, "u128 must be 16 bytes");
+	STATIC_ASSERT(sizeof(s128) == 16, "s128 must be 16 bytes");
+#endif //__SIZEOF_INT128__
+
 #endif //_KOCKET_SPECIAL_TYPE_SUPPORT_
 
 /* -------------------------------------------------------------------------------------------------------- */
 #ifdef _KOCKET_UTILS_IMPLEMENTATION_
 
-#include <stdarg.h>
+#ifdef _K_KOCKET_H_
+	#include <linux/stdarg.h>
+#else
+	#include <stdarg.h>
+#endif //_K_KOCKET_H_
 
-#define GET_BIT(val, bit_pos) ((val) >> (bit_pos))
+#define GET_BIT(val, bit_pos) (((val) >> (bit_pos)) & 0x01)
 #define HEX_TO_CHR_CAP(val) ((val) > 9 ? (val) + 55 : (val) + '0')
 #define KOCKET_BE_CONVERT(ptr_val, size) kocket_be_to_le(ptr_val, size)
 #if defined(__BYTE_ORDER) && __BYTE_ORDER == __LITTLE_ENDIAN || \
@@ -149,15 +161,6 @@ UNUSED_FUNCTION static u64 str_len(const char* str) {
 	u64 i = 0;
 	while (*str++) ++i;
 	return i;
-}
-
-UNUSED_FUNCTION static u8 bit_size(u8 val) {
-	u8 size = 8;
-	for (u8 i = 0; i < 8; ++i) {
-		if (GET_BIT(val, i)) break;
-		size--;
-	}
-	return size;
 }
 
 UNUSED_FUNCTION static void mem_move(void* dest, const void* src, size_t size) {
@@ -218,9 +221,9 @@ static u8* concat(u64 len, u64* size, ...) {
 
 	va_end(args);
 
-	u8* concatenation = calloc(*size, 1);
+	u8* concatenation = kocket_calloc(*size, 1);
 	if (concatenation == NULL) {
-		printf("Failed to allocate concatentation buffer.\n");
+		WARNING_LOG("Failed to allocate concatentation buffer.");
 		return NULL;
 	}
     
@@ -237,6 +240,25 @@ static u8* concat(u64 len, u64* size, ...) {
 	va_end(args);
 
 	return concatenation;
+}
+
+static u8 bit_size(u8 val) {
+	u8 size = 8;
+	for (s8 i = size - 1; i >= 0; --i) {
+		if (GET_BIT(val, i)) break;
+		size--;
+	}
+	return size;
+}
+
+static char* reverse_str(char* str) {
+    int len = str_len(str);
+    for (int i = 0; i < (len / 2); ++i) {
+        char temp = str[i];
+        str[i] = str[len - i - 1];
+        str[len - i - 1] = temp;
+    }
+    return str;
 }
 
 #endif // _KOCKET_UTILS_IMPLEMENTATION_
