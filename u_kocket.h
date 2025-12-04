@@ -40,6 +40,7 @@ int kocket_deinit(KocketStatus status);
 int kocket_write(KocketPacketEntry* kocket_packet, bool update_req_id);
 int kocket_read(u64 req_id, KocketPacketEntry* kocket_packet, bool wait_response);
 static int kocket_send(ClientKocket kocket, KocketPacket kocket_packet);
+static void* dispatch_handler_as_task(void* task_args);
 static int kocket_recv(ClientKocket kocket);
 static inline void stop_thread(void);
 static KocketStatus thread_should_stop(void);
@@ -279,11 +280,25 @@ static int kocket_send(ClientKocket kocket, KocketPacket kocket_packet) {
 	return KOCKET_NO_ERROR;
 }
 
+static void* dispatch_handler_as_task(void* task_args) {
+	KocketTask* handler_task = (KocketTask*) task_args;
+	
+	if ((handler_task -> result = (handler_task -> kocket_handler)(handler_task -> kocket_packet_entry)) < 0) {
+		WARNING_LOG("An error occurred while executing the handler for the type: '%s'", handler_task -> type_name);
+	}
+	
+	kocket_mutex_unlock(&handler_task -> done);
+
+	return NULL;
+}
+
 static int kocket_recv(ClientKocket kocket) {
 	int err = 0;
 	KocketPacket kocket_packet = {0};
-	if ((err = recv(kocket.socket, &kocket_packet, sizeof(KocketPacket) - sizeof(u8*), 0)) < (long long int) (sizeof(KocketPacket) - sizeof(u8*))) {
-		CHECK_RECV_ERR(err, kocket_packet.payload_size); 
+	u32 kocket_packet_hdr_size = sizeof(KocketPacket) - sizeof(u8*);
+
+	if ((err = recv(kocket.socket, &kocket_packet, kocket_packet_hdr_size, 0)) < (long long int) kocket_packet_hdr_size) {
+		CHECK_RECV_ERR(err, kocket_packet_hdr_size, kocket_packet.req_id); 
 		PERROR_LOG("An error occurred while reading from the client");
 		return -KOCKET_IO_ERROR;
 	}
@@ -299,7 +314,7 @@ static int kocket_recv(ClientKocket kocket) {
 		
 		if ((err = recv(kocket.socket, kocket_packet.payload, kocket_packet.payload_size, 0)) < (long int) kocket_packet.payload_size) {
 			KOCKET_SAFE_FREE(kocket_packet.payload);
-			CHECK_RECV_ERR(err, kocket_packet.payload_size); 
+			CHECK_RECV_ERR(err, kocket_packet.payload_size, kocket_packet.req_id); 
 			PERROR_LOG("An error occurred while reading from the server.");
 			return -KOCKET_IO_ERROR;
 		}
@@ -308,11 +323,39 @@ static int kocket_recv(ClientKocket kocket) {
 	int ret = 0;
 	KocketPacketEntry packet_entry = { .kocket_packet = kocket_packet };
 	if (kocket_packet.type_id < kocket.kocket_types_cnt && (kocket.kocket_types)[kocket_packet.type_id].has_handler) {
-		if ((ret = (*((kocket.kocket_types)[kocket_packet.type_id].kocket_handler)) (packet_entry)) < 0) {
+		DEBUG_LOG("Handling kocket with type id: %u", kocket_packet.type_id);
+		
+		KocketTask* handler_task = kocket_calloc(1, sizeof(KocketTask));
+		if (handler_task == NULL) {
+			WARNING_LOG("An error occurred while allocating the task handler.");
+			return -KOCKET_IO_ERROR;
+		}
+
+		handler_task -> kocket_packet_entry = packet_entry;
+		handler_task -> type_name = (kocket.kocket_types)[kocket_packet.type_id].type_name;
+		handler_task -> kocket_handler = *((kocket.kocket_types)[kocket_packet.type_id].kocket_handler);
+		kocket_mutex_init(&handler_task -> done);
+		kocket_mutex_lock(&handler_task -> done, 1);
+
+		pthread_t task_handler = 0;
+		if (pthread_create(&task_handler, NULL, dispatch_handler_as_task, handler_task) != 0) {
+			KOCKET_SAFE_FREE(handler_task);
+			WARNING_LOG("Failed to create and run the kthread.");
+			return -KOCKET_IO_ERROR;
+		}
+
+		kocket_mutex_lock(&handler_task -> done, DEFAULT_LOCK_TIMEOUT_SEC);
+		kocket_mutex_unlock(&handler_task -> done);
+		kocket_mutex_destroy(&handler_task -> done);
+		
+		ret = handler_task -> result;
+		KOCKET_SAFE_FREE(handler_task);
+		
+		if (ret < 0) {
 			WARNING_LOG("An error occurred while executing the handler for the type: '%s'", (kocket.kocket_types)[kocket_packet.type_id].type_name);
 			return ret;
 		}
-		DEBUG_LOG("Handled kocket with type_id: %u", kocket_packet.type_id);
+		
 		return KOCKET_NO_ERROR;
 	} 
 
@@ -372,6 +415,53 @@ static int kocket_poll_write(ClientKocket* kocket) {
 	return KOCKET_NO_ERROR;
 }
 
+static int can_read_full_packet(ClientKocket kocket) {
+	int err = 0;
+	KocketPacket kocket_packet = {0};
+	u32 kocket_packet_hdr_size = sizeof(KocketPacket) - sizeof(u8*);
+
+	// Peek the packet header for retrieving payload info
+	if ((err = recv(kocket.socket, &kocket_packet, kocket_packet_hdr_size, MSG_PEEK)) < (long long int) (kocket_packet_hdr_size)) {
+		if (err < 0) {
+			PERROR_LOG("An error occurred while reading from the server");
+			return -KOCKET_IO_ERROR;
+		} else if (err == 0) {                                                                  
+			WARNING_LOG("The connection has been closed");                                      
+			return -KOCKET_CLOSED_CONNECTION;                                                   
+		}																		 
+		
+		return KOCKET_NO_ERROR;
+	}
+
+	// If payload is present peek the payload
+	// NOTE: the previous peek does not consume data, therefore the header will still be there before the payload
+	if (kocket_packet.payload_size > 0) {
+		kocket_packet.payload = (u8*) kocket_calloc(kocket_packet.payload_size + kocket_packet_hdr_size, sizeof(u8));
+		if (kocket_packet.payload == NULL) {
+			WARNING_LOG("An error occurred while allocating the buffer for the payload.");
+			return -KOCKET_IO_ERROR;
+		}
+		
+		if ((err = recv(kocket.socket, kocket_packet.payload, kocket_packet.payload_size + kocket_packet_hdr_size, MSG_PEEK)) < (long int) (kocket_packet.payload_size + kocket_packet_hdr_size)) {
+			KOCKET_SAFE_FREE(kocket_packet.payload);
+			
+			if (err < 0) {
+				PERROR_LOG("An error occurred while reading from the server");
+				return -KOCKET_IO_ERROR;
+			} else if (err == 0) {                                                                  
+				WARNING_LOG("The connection has been closed");                                      
+				return -KOCKET_CLOSED_CONNECTION;                                                   
+			}																		 
+			
+			return KOCKET_NO_ERROR;
+		}
+	}
+
+	KOCKET_SAFE_FREE(kocket_packet.payload);
+
+	return KOCKET_PACKET_AVAILABLE;
+}
+
 // This will be the function executed by the kocket-thread.
 void* kocket_dispatcher(void* kocket_arg) {
 	ClientKocket kocket = *KOCKET_CAST_PTR(kocket_arg, ClientKocket);
@@ -391,8 +481,14 @@ void* kocket_dispatcher(void* kocket_arg) {
 			break;
 		}
 		
-		if ((kocket.poll_fd.revents & POLLIN) && (ret = kocket_recv(kocket)) < 0) {
-			WARNING_LOG("An error occurred while receiving.");
+		if ((kocket.poll_fd.revents & POLLIN) && (ret = can_read_full_packet(kocket)) == KOCKET_PACKET_AVAILABLE) {
+		   	if ((ret = kocket_recv(kocket)) < 0) {
+				WARNING_LOG("An error occurred while receiving.");
+				err = ret;
+				break;
+			}
+		} else if (ret < 0) {
+			WARNING_LOG("An error occurred while checking if the entire packet is available for read.");
 			err = ret;
 			break;
 		}

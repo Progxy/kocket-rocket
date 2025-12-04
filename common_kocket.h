@@ -127,6 +127,18 @@ typedef struct KocketType {
 	} ClientKocket;
 #endif //_K_KOCKET_H_
 
+typedef struct KocketTask {
+	KocketHandler kocket_handler;
+	char* type_name;
+	KocketPacketEntry kocket_packet_entry;
+	int result;
+#ifdef _K_KOCKET_H_
+	struct completion done;
+#else 
+	mutex_t done;
+#endif //_K_KOCKET_H_
+} KocketTask;
+
 /* -------------------------------------------------------------------------------------------------------- */
 // Constant Values
 // NOTE: Those values should be changed based on the requirement of the operational environment.
@@ -138,13 +150,13 @@ typedef struct KocketType {
 // --------------------
 //  Macros Definitions
 // --------------------
-#define CHECK_RECV_ERR(err, payload_size) 									 \
-	if (err > 0) {															 \
-		WARNING_LOG("Expected %u bytes but received %d", payload_size, err); \
-		return -KOCKET_NO_DATA_RECEIVED;									 \
-	} else if (err == 0) {													 \
-		WARNING_LOG("The connection has been closed");		 				 \
-		return -KOCKET_CLOSED_CONNECTION;									 \
+#define CHECK_RECV_ERR(err, payload_size, id)                                                  \
+	if (err > 0) {                                                                             \
+		WARNING_LOG("Expected %u bytes but received %d with id: %llu", payload_size, err, id); \
+		return -KOCKET_NO_DATA_RECEIVED;                                                       \
+	} else if (err == 0) {                                                                     \
+		WARNING_LOG("The connection has been closed");                                         \
+		return -KOCKET_CLOSED_CONNECTION;                                                      \
 	}																		 
 
 /* -------------------------------------------------------------------------------------------------------- */
