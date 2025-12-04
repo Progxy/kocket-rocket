@@ -30,6 +30,9 @@
 #define SSIG0(x)     (ROTR((x), 1)  ^ ROTR((x), 8)  ^ ((x) >> 7))
 #define SSIG1(x)     (ROTR((x), 19) ^ ROTR((x), 61) ^ ((x) >> 6))
 
+typedef u8 sha512_t[64];
+typedef u64 sha512_64_t[8];
+
 static const u64 costants[] = {
 	0x428A2F98D728AE22, 0x7137449123EF65CD, 0xB5C0FBCFEC4D3B2F, 0xE9B5DBA58189DBBC,
 	0x3956C25BF348B538, 0x59F111F1B605D019, 0x923F82A4AF194F9B, 0xAB1C5ED5DA6D8118,
@@ -53,13 +56,17 @@ static const u64 costants[] = {
 	0x4CC5D4BECB3E42B6, 0x597F299CFC657E2A, 0x5FCB6FAB3AD6FAEC, 0x6C44198C4A475817
 };
 
-static void print_hash(u8* hash) {
-	printf("hash: ");
+#define PRINT_HASH(hash) print_hash(#hash, hash)
+
+static void print_hash(const char* name, u8* hash) {
+	printf("%s:\n", name);
 	
-	for (unsigned int i = 0; i < 8; ++i) {
-		printf("%llX", ((u64*) hash)[i]);
-	}
+	printf("\tLittle Endian: ");
+	for (int i = 63; i >= 0; --i) printf("%02X", hash[i]);
+	printf("\n");
 	
+	printf("\tBig Endian:    ");
+	for (unsigned int i = 0; i < 64; ++i) printf("%02X", hash[i]);
 	printf("\n");
 	
 	return;
@@ -97,9 +104,8 @@ static u8* padding(u8* data, u64 len, int* blocks_cnt) {
 
 	mem_cpy(padded_data, data, len);
 	padded_data[len] = 0x80;
-	((u64*) padded_data)[new_size / 8 - 2] = len >> 61;	
+	
 	((u64*) padded_data)[new_size / 8 - 1] = len * 8;	
-	KOCKET_BE_CONVERT(((u64*) padded_data) + (new_size / 8 - 2), 8);
 	KOCKET_BE_CONVERT(((u64*) padded_data) + (new_size / 8 - 1), 8);
 	
 	DEBUG_LOG("blocks_cnt: %d, k: %llu, new_size: %llu", *blocks_cnt, k, new_size);
@@ -107,7 +113,10 @@ static u8* padding(u8* data, u64 len, int* blocks_cnt) {
 	return padded_data;
 }
 
-int sha512(u8* data, u64 len, u64 hash[8]) {
+#define sha512_le(data, len, res) __sha512(data, len, res, TRUE)
+#define sha512(data, len, res)    __sha512(data, len, res, FALSE)
+
+int __sha512(u8* data, u64 len, sha512_64_t res, bool use_le) {
 	int blocks_cnt = 0;
 	
 	u8* padded_data = padding(data, len, &blocks_cnt);
@@ -115,11 +124,8 @@ int sha512(u8* data, u64 len, u64 hash[8]) {
 		ERROR_LOG("Failed to pad the data.", kocket_status_str[-blocks_cnt]);
 		return blocks_cnt;
 	}
-
-	for (u64 i = 0; i < (blocks_cnt * BLOCK_SIZE_IN_BYTES / 8ULL); ++i) {
-		KOCKET_BE_CONVERT(padded_data + i * 8, 8);
-	}
 	
+	sha512_64_t hash = {0};
 	hash[0] = 0x6A09E667F3BCC908;
     hash[1] = 0xBB67AE8584CAA73B;
     hash[2] = 0x3C6EF372FE94F82B;
@@ -133,6 +139,7 @@ int sha512(u8* data, u64 len, u64 hash[8]) {
 		u64 W[80] = {0};
 
 		mem_cpy(W, padded_data + BLOCK_SIZE_IN_BYTES * i, BLOCK_SIZE_IN_BYTES);
+		for (unsigned int t = 0; t < 16; ++t) KOCKET_BE_CONVERT(W + t, 8);
 		for (unsigned int t = 16; t < 80; ++t) {
 			W[t] = SSIG1(W[t - 2]) + W[t - 7] + SSIG0(W[t - 15]) + W[t - 16];
 		}
@@ -170,6 +177,17 @@ int sha512(u8* data, u64 len, u64 hash[8]) {
 	}
 	
 	KOCKET_SAFE_FREE(padded_data);
+
+	res[0] = hash[7];
+	res[1] = hash[6];
+	res[2] = hash[5];
+	res[3] = hash[4];
+	res[4] = hash[3];
+	res[5] = hash[2];
+	res[6] = hash[1];
+	res[7] = hash[0];
+	
+	if (!use_le) KOCKET_BE_CONVERT(res, 64);
 
 	return KOCKET_NO_ERROR;
 }

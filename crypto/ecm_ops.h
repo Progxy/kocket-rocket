@@ -136,17 +136,45 @@ static const ECMScalar decoding_exp_two = {
 
 static const ECMScalar invalid_scalar = { 0 };
 
+#define ECM_PRINT_POINT(point) ecm_print_point(#point, point)
+void ecm_print_point(const char* name, const ECMPoint point) {
+	printf("%s:\n", name);
+	
+	printf("\tx: ");
+	for (int i = 63; i >= 0; --i) printf("%02X", (point.x.data)[i]);
+	printf("\n");
+	
+	printf("\ty: ");
+	for (int i = 63; i >= 0; --i) printf("%02X", (point.y.data)[i]);
+	printf("\n");
+	
+	printf("\tz: ");
+	for (int i = 63; i >= 0; --i) printf("%02X", (point.z.data)[i]);
+	printf("\n");
+	
+	printf("\tt: ");
+	for (int i = 63; i >= 0; --i) printf("%02X", (point.t.data)[i]);
+	printf("\n");
+
+	return;
+}
+
+#define ECM_PRINT_SCALAR(scalar) ecm_print_scalar(#scalar, scalar)
+void ecm_print_scalar(const char* name, const ECMScalar scalar) {
+	printf("%s: ", name);
+	for (int i = 63; i >= 0; --i) printf("%02X", (scalar.data)[i]);
+	printf("\n");
+	return;
+}
+
 static ECMTempScalar* head_scalar = NULL;
 static ECMTempScalar* curr_scalar = NULL;
 
-/* NOTE: Unless explicitly said each operation is performed modulo p */
-
 void ecm_clean_temp(void) {
 	while (head_scalar != NULL) {
-		ECMTempScalar* prev_scalar = head_scalar;
-		DEBUG_LOG("Deallocating: %p", (void*) prev_scalar);
-		KOCKET_SAFE_FREE(prev_scalar);
-		head_scalar = head_scalar -> next;
+		ECMTempScalar* next_scalar = head_scalar -> next;
+		KOCKET_SAFE_FREE(head_scalar);
+		head_scalar = next_scalar;
 	}
 	curr_scalar = NULL;
 	return;
@@ -155,11 +183,6 @@ void ecm_clean_temp(void) {
 // TODO: Pass int for err handling
 // TODO: Find a way to maintain the sugar syntax, while performing error
 //       handling (and maybe possibly also avoid repetitive temp allocations)
-
-// URGENT!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-// TODO: There are clearly some problems with using simply the data from
-// ECMScalar, therefore should use the alloc_chonky_num to correctly perform
-// the operation with chonky nums and then simply mem_cpy the results
 ECMScalar ecm_add(ECMScalar a, ECMScalar b) {
 	ECMTempScalar* temp_scalar = calloc(1, sizeof(ECMTempScalar));
 	if (temp_scalar == NULL) {
@@ -172,7 +195,6 @@ ECMScalar ecm_add(ECMScalar a, ECMScalar b) {
 	else curr_scalar -> next = temp_scalar;
 
 	curr_scalar = temp_scalar;
-	DEBUG_LOG("Allocating: %p", (void*) temp_scalar);
 
 	BigNum a_num = POS_STATIC_BIG_NUM(a.data, SCALAR_SIZE);
 	BigNum b_num = POS_STATIC_BIG_NUM(b.data, SCALAR_SIZE);
@@ -180,9 +202,13 @@ ECMScalar ecm_add(ECMScalar a, ECMScalar b) {
 	BigNum res   = POS_STATIC_BIG_NUM((temp_scalar -> value).data, SCALAR_SIZE);
 
 	__chonky_add(&res, &a_num, &b_num);
-	
-	if (__chonky_mod_mersenne(&res, &res, &p_num) == NULL) return invalid_scalar;
 
+	ECMScalar temp_data = {0};
+	BigNum temp_res = POS_STATIC_BIG_NUM(temp_data.data, SCALAR_SIZE);
+	mem_cpy(temp_data.data, res.data, sizeof(ECMScalar));
+	
+	if (__chonky_mod_mersenne(&res, &temp_res, &p_num) == NULL) return invalid_scalar;
+	
 	return temp_scalar -> value;
 }
 
@@ -198,16 +224,19 @@ ECMScalar ecm_sub(ECMScalar a, ECMScalar b) {
 	else curr_scalar -> next = temp_scalar;
 
 	curr_scalar = temp_scalar;
-	DEBUG_LOG("Allocating: %p", (void*) temp_scalar);
 	
 	BigNum a_num = POS_STATIC_BIG_NUM(a.data, SCALAR_SIZE);
-	BigNum b_num = STATIC_BIG_NUM(b.data, SCALAR_SIZE, 1);
+	BigNum b_num = POS_STATIC_BIG_NUM(b.data, SCALAR_SIZE);
 	BigNum p_num = POS_STATIC_BIG_NUM(p.data, SCALAR_SIZE);
 	BigNum res   = POS_STATIC_BIG_NUM((temp_scalar -> value).data, SCALAR_SIZE);
 
-	__chonky_add(&res, &a_num, &b_num);
+	__chonky_sub(&res, &a_num, &b_num);
 	
-	if (__chonky_mod_mersenne(&res, &res, &p_num) == NULL) return invalid_scalar;
+	ECMScalar temp_data = {0};
+	BigNum temp_res = POS_STATIC_BIG_NUM(temp_data.data, SCALAR_SIZE);
+	mem_cpy(temp_data.data, res.data, sizeof(ECMScalar));
+	
+	if (__chonky_mod_mersenne(&res, &temp_res, &p_num) == NULL) return invalid_scalar;
 
 	return temp_scalar -> value;
 }
@@ -224,7 +253,6 @@ ECMScalar ecm_mul(ECMScalar a, ECMScalar b) {
 	else curr_scalar -> next = temp_scalar;
 
 	curr_scalar = temp_scalar;
-	DEBUG_LOG("Allocating: %p", (void*) temp_scalar);
 
 	u8* temp_data[SCALAR_SIZE * 2 + 8] = {0};
 	BigNum a_num   = POS_STATIC_BIG_NUM(a.data, SCALAR_SIZE);
@@ -234,7 +262,11 @@ ECMScalar ecm_mul(ECMScalar a, ECMScalar b) {
 	BigNum res_num = POS_STATIC_BIG_NUM((temp_scalar -> value).data, SCALAR_SIZE);
 
 	if (__chonky_mul_s(&res, &a_num, &b_num) == NULL) return invalid_scalar;
+	PRINT_CHONKY_NUM(&res);
+
+	/// TODO: Here is the error
 	if (__chonky_mod_mersenne(&res_num, &res, &p_num) == NULL) return invalid_scalar;
+	PRINT_CHONKY_NUM(&res_num);
 
 	return temp_scalar -> value;
 }
@@ -251,7 +283,6 @@ ECMScalar ecm_spow(ECMScalar a, ECMScalar exp) {
 	else curr_scalar -> next = temp_scalar;
 
 	curr_scalar = temp_scalar;
-	DEBUG_LOG("Allocating: %p", (void*) temp_scalar);
 	
 	BigNum a_num   = POS_STATIC_BIG_NUM(a.data, SCALAR_SIZE);
 	BigNum p_num   = POS_STATIC_BIG_NUM(p.data, SCALAR_SIZE);
@@ -275,7 +306,6 @@ ECMScalar ecm_pow(ECMScalar a, u64 exp) {
 	else curr_scalar -> next = temp_scalar;
 
 	curr_scalar = temp_scalar;
-	DEBUG_LOG("Allocating: %p", (void*) temp_scalar);
 
 	BigNum a_num   = POS_STATIC_BIG_NUM(a.data, SCALAR_SIZE);
 	BigNum p_num   = POS_STATIC_BIG_NUM(p.data, SCALAR_SIZE);
@@ -305,7 +335,6 @@ ECMScalar ecm_mod(ECMScalar a, ECMScalar mod_base) {
 	else curr_scalar -> next = temp_scalar;
 
 	curr_scalar = temp_scalar;
-	DEBUG_LOG("Allocating: %p", (void*) temp_scalar);
 
 	BigNum a_num        = POS_STATIC_BIG_NUM(a.data, SCALAR_SIZE);
 	BigNum mod_base_num = POS_STATIC_BIG_NUM(mod_base.data, SCALAR_SIZE);
@@ -316,10 +345,11 @@ ECMScalar ecm_mod(ECMScalar a, ECMScalar mod_base) {
 	return temp_scalar -> value;
 }
 
-/* NOTE: 
- * As we perform operation modulo p, also this can be reinterpreted as:
- * neg_a = -a (mod p) <==> neg_a = p - a 
- */
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+ * NOTE:                                                                 *
+ * As we perform operation modulo p, also this can be reinterpreted as:  *
+ * neg_a = -a (mod p) <==> neg_a = p - a                                 *
+ * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 ECMScalar ecm_neg(ECMScalar a) {
 	ECMScalar neg_a = ecm_sub(p, a);
 	/* if (err) { */
@@ -359,16 +389,13 @@ bool is_point_eq(ECMPoint* a, ECMPoint* b) {
 	);
 }
 
-ECMPoint* coord_to_point(ECMCoord* coord) {
-	ECMPoint* point = calloc(1, sizeof(ECMPoint));
-	if (point == NULL) {
-		WARNING_LOG("Failed to allocate neutral point buffer.");
-		return NULL;
-	}
-
+ECMPoint* coord_to_point(ECMCoord* coord, ECMPoint* point) {
 	mem_cpy((point -> x).data, (coord -> x).data, sizeof(ECMScalar));
 	mem_cpy((point -> y).data, (coord -> y).data, sizeof(ECMScalar));
+	
+	mem_set((point -> z).data, 0, sizeof(ECMScalar));
 	((point -> z).data)[0] = 1;
+	
 	mem_cpy((point -> t).data, ecm_mul(coord -> x, coord -> y).data, sizeof(ECMScalar));
 	
 	ecm_clean_temp();
@@ -416,6 +443,7 @@ ECMPoint* add_point(ECMPoint* point_a, ECMPoint* point_b, bool same_point) {
 	return point;
 }
 
+// TODO: Currently broken
 ECMPoint* double_point(ECMPoint* point, bool same_point) {
 	ECMScalar A = ecm_pow(point -> x, 2);
 	ECMScalar B = ecm_pow(point -> y, 2);
@@ -424,15 +452,20 @@ ECMPoint* double_point(ECMPoint* point, bool same_point) {
 	ECMScalar E = ecm_sub(H, ecm_pow(ecm_add(point -> x, point -> y), 2));
 	ECMScalar G = ecm_sub(A, B);
 	ECMScalar F = ecm_add(C, G);
+	ECM_PRINT_SCALAR(G);
+	ECM_PRINT_SCALAR(F);
 	
 	if (same_point) {
-		mem_cpy((point -> x).data, ecm_mul(E, F).data, sizeof(ECMScalar));
+		ECMScalar x_3 = ecm_mul(E, F);
+		ECM_PRINT_SCALAR(x_3);
+		mem_cpy((point -> x).data, x_3.data, sizeof(ECMScalar));
 		mem_cpy((point -> y).data, ecm_mul(G, H).data, sizeof(ECMScalar));
 		mem_cpy((point -> t).data, ecm_mul(E, H).data, sizeof(ECMScalar));
 		mem_cpy((point -> z).data, ecm_mul(F, G).data, sizeof(ECMScalar));
 		
-		DEBUG_LOG("Cleaning, from double point internal");
 		ecm_clean_temp();
+		
+		return point;
 	}
 	
 	ECMPoint* res_point = calloc(1, sizeof(ECMPoint));
@@ -447,52 +480,72 @@ ECMPoint* double_point(ECMPoint* point, bool same_point) {
 	mem_cpy((res_point -> t).data, ecm_mul(E, H).data, sizeof(ECMScalar));
 	mem_cpy((res_point -> z).data, ecm_mul(F, G).data, sizeof(ECMScalar));
 		
-	DEBUG_LOG("Cleaning, from double point");
 	ecm_clean_temp();
 
 	return res_point;
 }
 
-ECMPoint* neutral_point(void) {
-	ECMPoint* point = calloc(1, sizeof(ECMPoint));
-	if (point == NULL) {
-		WARNING_LOG("Failed to allocate neutral point buffer.");
-		return NULL;
-	}
-
+static inline ECMPoint* neutral_point(ECMPoint* point) {
 	(point -> x).data[0] = 0;
 	(point -> y).data[0] = 1;
 	(point -> z).data[0] = 1;
 	(point -> t).data[0] = 0;
-	
 	return point;
 }
 
-ECMPoint* mul_point(ECMScalar scalar, ECMPoint* P) {
-	ECMPoint* R = neutral_point(); 	
-	for (int i = 254; i >= 0; --i) {
-    	R = double_point(R, TRUE);
-    	if (GET_SCALAR_BIT(scalar, i)) R = add_point(R, P, TRUE);
+static ECMPoint* dup_point(ECMPoint* point) {
+	ECMPoint* dup_point = calloc(1, sizeof(ECMPoint));
+	if (dup_point == NULL) {
+		WARNING_LOG("Failed to dup the point.");
+		return NULL;
 	}
+
+	mem_cpy(dup_point -> x.data, point -> x.data, sizeof(ECMScalar));
+	mem_cpy(dup_point -> y.data, point -> y.data, sizeof(ECMScalar));
+	mem_cpy(dup_point -> z.data, point -> z.data, sizeof(ECMScalar));
+	mem_cpy(dup_point -> t.data, point -> t.data, sizeof(ECMScalar));
+
+	return dup_point;
+}
+
+ECMPoint* mul_point(ECMScalar scalar, ECMPoint* P, ECMPoint* R) {
+	neutral_point(R);
+	ECMPoint* base_mul_point = dup_point(P);
+	for (unsigned int i = 0; i < 255; ++i) {
+		printf("\n----------------------\ni: %u\n\n", i);
+		ECM_PRINT_POINT(*R);
+    	if (GET_SCALAR_BIT(scalar, i)) add_point(R, base_mul_point, TRUE);
+		ECM_PRINT_POINT(*R);
+		ECM_PRINT_POINT(*base_mul_point);
+		
+		// TODO: This performs too much mods respect the python implementation
+		/* add_point(base_mul_point, base_mul_point, TRUE); */
+		
+		// TODO: This is broken, for some reason
+		double_point(base_mul_point, TRUE);
+		
+		ECM_PRINT_POINT(*base_mul_point);
+		printf("\n----------------------\n");
+		if (i == 0) abort();
+	}
+	KOCKET_SAFE_FREE(base_mul_point);
 	return R;
 }
 
-void compress_point(ECMScalar res, ECMPoint* point, bool clean) {
+// TODO: Investigating here
+void compress_point(ECMScalar* res, ECMPoint* point) {
 	ECMScalar x = point -> x;
 	ECMScalar y = point -> y;
 	
-	y.data[31] &= ~(0x80);
-	mem_cpy(res.data, y.data, sizeof(ECMScalar));
-	res.data[31] &= ~((x.data[0] & 0x01) << 7);
-
-	if (clean) KOCKET_SAFE_FREE(point);
-
+	mem_cpy(res -> data, y.data, sizeof(ECMScalar));
+	(res -> data)[31] &= ~(0x80);
+	(res -> data)[31] &= ~((x.data[0] & 0x01) << 7);
+	
 	return;
 }
 
 ECMCoord* decode_point(ECMScalar scalar) {
-	ECMScalar x_0 = {0};
-	x_0.data[0] = GET_SCALAR_BIT(scalar, 31 * 8 + 7);
+	u8 x_0 = GET_SCALAR_BIT(scalar, 31 * 8 + 7);
 	
 	ECMScalar y = {0};
 	mem_cpy(y.data, scalar.data, sizeof(ECMScalar));
@@ -520,12 +573,12 @@ ECMCoord* decode_point(ECMScalar scalar) {
 	}
 
 	const ECMScalar zero = {0};
-	if (ecm_iseq(x, zero) && x_0.data[0] == 1) {
+	if (ecm_iseq(x, zero) && (x_0 == 1)) {
 	    // If x = 0, and x_0 = 1, decoding fails.  
 		ecm_clean_temp();
 		WARNING_LOG("Failed to decode point, x = 0, and x_0 = 1.");
 		return NULL;
-	} else if (!ecm_iseq(ecm_mod(x, two), x_0)) {
+	} else if (GET_SCALAR_BIT(x, 0) != x_0) {
 		// Otherwise, if x_0 != x mod 2, set x <-- p - x.  
 		x = ecm_sub(x, p);
 	}

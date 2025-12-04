@@ -200,7 +200,7 @@ static void mem_set_var(void* ptr, int value, size_t size, size_t val_size) {
 
 static char* to_hex_str(u8* val, unsigned int size, char* str, bool use_space) {
 	unsigned int i = 0;
-    for (unsigned int j = 0; j < size; i += 2 + use_space, ++j) {
+    for (int j = size - 1; j >= 0; i += 2 + use_space, --j) {
         str[i] = HEX_TO_CHR_CAP((val[j] >> 4) & 0xF);
         str[i + 1] = HEX_TO_CHR_CAP(val[j] & 0xF);
 		if (use_space) str[i + 2] = ' ';	

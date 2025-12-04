@@ -652,6 +652,7 @@ static void __chonky_divstep(u64 size_diff, BigNum* a, const BigNum* b, u64 c) {
 	}
 
 	CHONKY_ASSERT(!carry[0] && !carry[1] && !carry[2] && !carry[3] && !carry[4]);
+	if (carry[0] || carry[1] || carry[2] || carry[3] || carry[4]) WARNING_LOG("size_diff: %llu, %llu", size_diff, align_64(chonky_real_size(b)));
 
 	return;
 }
@@ -660,9 +661,10 @@ CHONKY_FAILABLE static BigNum* __chonky_div(BigNum* quotient, BigNum* remainder,
 	// NOTE: We do not support floating point division for now
 	if (chonky_real_size(a) < chonky_real_size(b)) return quotient;
 	
-	BigNum* a_c = dup_chonky_num(a);
+	BigNum* a_c = alloc_chonky_num(NULL, a -> size + 8, a -> sign);
 	if (a_c == NULL) return NULL;
-	
+	mem_cpy(a_c -> data, a -> data, a -> size);
+
 	BigNum* b_c = dup_chonky_num(b);
 	if (b_c == NULL) {
 		dealloc_chonky_num(a_c);
@@ -681,14 +683,20 @@ CHONKY_FAILABLE static BigNum* __chonky_div(BigNum* quotient, BigNum* remainder,
 		// Perform the division with the upper components
 		const u8 additional = (low_limit >= 8) ? ((b_c -> data)[low_limit - 8]) && ((b_c -> data)[low_limit - 8] >= (a_c -> data)[i - 7]) : 0;
 		
-		u64 a_val = *((u64*) (a_c -> data + i - 7));
-		u64 b_val = *((u64*) (b_c -> data + low_limit - 7)) + additional;
-		
+		u64 a_val = *((u64*) (a_c -> data + MAX((s64) i - 7, 0)));
+		u64 b_val = *((u64*) (b_c -> data + MAX((s64) low_limit - 7, 0))) + additional;
+
 		if (i > low_limit && a_val < b_val) {
 			b_val = (b_val >> 8) + 1;
 			i--;
 		}
 		
+		if (a_val < b_val) {
+			WARNING_LOG("a_val < b_val");
+			PRINT_CHONKY_NUM(a_c);
+			PRINT_CHONKY_NUM(b_c);
+		}
+
 		u64 q_hat = a_val / b_val;
 		CHONKY_ASSERT(q_hat != 0);
 
@@ -698,7 +706,10 @@ CHONKY_FAILABLE static BigNum* __chonky_div(BigNum* quotient, BigNum* remainder,
 		i = chonky_real_size(a_c) - 1;
 	}
 	
-	if (remainder != NULL) copy_chonky_num(remainder, a_c);
+	if (remainder != NULL) {
+		/* copy_chonky_num(remainder, a_c); */
+		mem_cpy(remainder -> data, a_c -> data, remainder -> size);
+	}
 
 	DEALLOC_CHONKY_NUMS(a_c, b_c);
 
@@ -808,10 +819,7 @@ CHONKY_FAILABLE static BigNum* __chonky_mod_mersenne(BigNum* res, const BigNum* 
 	if (chonky_is_gt(base, num)) {
 		mem_cpy(res -> data, num -> data, base -> size);
 		return res;
-	} else if (chonky_real_size_64(base) == chonky_real_size_64(num)) {
-		__chonky_mod(res, num, base);
-		return res;	
-	}
+	} 
 	
 	if (get_mersenne_factor(base, res) == NULL) return NULL;
 	
