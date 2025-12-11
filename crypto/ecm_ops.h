@@ -93,6 +93,14 @@ static const ECMScalar p = {
 	}
 };
 
+static const ECMScalar p_minus_2 = {
+	.data = {
+		0xEB, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F
+	}
+};
+
 /* Order of edwards25519 */
 static const ECMScalar L = {
 	.data = {
@@ -229,14 +237,20 @@ ECMScalar ecm_sub(ECMScalar a, ECMScalar b) {
 	BigNum b_num = POS_STATIC_BIG_NUM(b.data, SCALAR_SIZE);
 	BigNum p_num = POS_STATIC_BIG_NUM(p.data, SCALAR_SIZE);
 	BigNum res   = POS_STATIC_BIG_NUM((temp_scalar -> value).data, SCALAR_SIZE);
-
-	__chonky_sub(&res, &a_num, &b_num);
+	res.sign = !chonky_is_gt(&a_num, &b_num);
 	
+	__chonky_sub(&res, &a_num, &b_num);
+		
 	ECMScalar temp_data = {0};
 	BigNum temp_res = POS_STATIC_BIG_NUM(temp_data.data, SCALAR_SIZE);
 	mem_cpy(temp_data.data, res.data, sizeof(ECMScalar));
 	
 	if (__chonky_mod_mersenne(&res, &temp_res, &p_num) == NULL) return invalid_scalar;
+	
+	if (res.sign) {
+		res.sign = 0;
+		__chonky_sub(&res, &p_num, &res);
+	}
 
 	return temp_scalar -> value;
 }
@@ -262,11 +276,7 @@ ECMScalar ecm_mul(ECMScalar a, ECMScalar b) {
 	BigNum res_num = POS_STATIC_BIG_NUM((temp_scalar -> value).data, SCALAR_SIZE);
 
 	if (__chonky_mul_s(&res, &a_num, &b_num) == NULL) return invalid_scalar;
-	PRINT_CHONKY_NUM(&res);
-
-	/// TODO: Here is the error
 	if (__chonky_mod_mersenne(&res_num, &res, &p_num) == NULL) return invalid_scalar;
-	PRINT_CHONKY_NUM(&res_num);
 
 	return temp_scalar -> value;
 }
@@ -312,6 +322,7 @@ ECMScalar ecm_pow(ECMScalar a, u64 exp) {
 	BigNum exp_num = POS_STATIC_BIG_NUM(&exp, 8);
 	BigNum res     = POS_STATIC_BIG_NUM((temp_scalar -> value).data, SCALAR_SIZE);
 
+	// TODO: Error is actually in here mf
 	if (__chonky_pow_mod_mersenne(&res, &a_num, &exp_num, &p_num) == NULL) return invalid_scalar;
 	
 	return temp_scalar -> value;
@@ -443,7 +454,6 @@ ECMPoint* add_point(ECMPoint* point_a, ECMPoint* point_b, bool same_point) {
 	return point;
 }
 
-// TODO: Currently broken
 ECMPoint* double_point(ECMPoint* point, bool same_point) {
 	ECMScalar A = ecm_pow(point -> x, 2);
 	ECMScalar B = ecm_pow(point -> y, 2);
@@ -452,13 +462,9 @@ ECMPoint* double_point(ECMPoint* point, bool same_point) {
 	ECMScalar E = ecm_sub(H, ecm_pow(ecm_add(point -> x, point -> y), 2));
 	ECMScalar G = ecm_sub(A, B);
 	ECMScalar F = ecm_add(C, G);
-	ECM_PRINT_SCALAR(G);
-	ECM_PRINT_SCALAR(F);
 	
 	if (same_point) {
-		ECMScalar x_3 = ecm_mul(E, F);
-		ECM_PRINT_SCALAR(x_3);
-		mem_cpy((point -> x).data, x_3.data, sizeof(ECMScalar));
+		mem_cpy((point -> x).data, ecm_mul(E, F).data, sizeof(ECMScalar));
 		mem_cpy((point -> y).data, ecm_mul(G, H).data, sizeof(ECMScalar));
 		mem_cpy((point -> t).data, ecm_mul(E, H).data, sizeof(ECMScalar));
 		mem_cpy((point -> z).data, ecm_mul(F, G).data, sizeof(ECMScalar));
@@ -509,37 +515,28 @@ static ECMPoint* dup_point(ECMPoint* point) {
 }
 
 ECMPoint* mul_point(ECMScalar scalar, ECMPoint* P, ECMPoint* R) {
-	neutral_point(R);
 	ECMPoint* base_mul_point = dup_point(P);
+	neutral_point(R);
+	
 	for (unsigned int i = 0; i < 255; ++i) {
-		printf("\n----------------------\ni: %u\n\n", i);
-		ECM_PRINT_POINT(*R);
     	if (GET_SCALAR_BIT(scalar, i)) add_point(R, base_mul_point, TRUE);
-		ECM_PRINT_POINT(*R);
-		ECM_PRINT_POINT(*base_mul_point);
-		
-		// TODO: This performs too much mods respect the python implementation
-		/* add_point(base_mul_point, base_mul_point, TRUE); */
-		
-		// TODO: This is broken, for some reason
 		double_point(base_mul_point, TRUE);
-		
-		ECM_PRINT_POINT(*base_mul_point);
-		printf("\n----------------------\n");
-		if (i == 0) abort();
 	}
+	
 	KOCKET_SAFE_FREE(base_mul_point);
+	
 	return R;
 }
 
-// TODO: Investigating here
 void compress_point(ECMScalar* res, ECMPoint* point) {
-	ECMScalar x = point -> x;
-	ECMScalar y = point -> y;
-	
+	ECMScalar z_inv = ecm_spow(point -> z, p_minus_2);
+	ECMScalar x = ecm_mul(point -> x, z_inv);
+	ECMScalar y = ecm_mul(point -> y, z_inv);
+
 	mem_cpy(res -> data, y.data, sizeof(ECMScalar));
-	(res -> data)[31] &= ~(0x80);
-	(res -> data)[31] &= ~((x.data[0] & 0x01) << 7);
+	(res -> data)[31] |= (x.data[0] & 0x01) << 7;
+	
+	ecm_clean_temp();
 	
 	return;
 }

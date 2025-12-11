@@ -45,6 +45,7 @@ int generate_pub_key(Ed25519Key pub_key, Ed25519Key priv_key) {
 
 	KOCKET_BE_CONVERT(priv_key, sizeof(Ed25519Key));
 	if ((err = sha512(priv_key, sizeof(Ed25519Key), (u64*) h))) return err;
+	KOCKET_BE_CONVERT(priv_key, sizeof(Ed25519Key));
 
 	mem_cpy(pub_key, h, sizeof(Ed25519Key));
 	
@@ -53,15 +54,14 @@ int generate_pub_key(Ed25519Key pub_key, Ed25519Key priv_key) {
 	pub_key[31] &= ~(0x80);
 	pub_key[31] |= 0x40;
 	
-	PRINT_KEY(pub_key);
-	
 	ECMPoint temp_point = {0};
 	ECMScalar pub_key_scalar = ptr_to_scalar(pub_key, sizeof(Ed25519Key));
 	mul_point(ptr_to_scalar(pub_key, sizeof(Ed25519Key)), (ECMPoint*) &base_point, &temp_point);
-	ECM_PRINT_POINT(temp_point);
 	compress_point(&pub_key_scalar, &temp_point);
 	
-	ECM_PRINT_SCALAR(pub_key_scalar);
+	mem_cpy(pub_key, pub_key_scalar.data, sizeof(Ed25519Key));
+
+	KOCKET_BE_CONVERT(pub_key, sizeof(Ed25519Key));
 
 	return KOCKET_NO_ERROR;
 }
@@ -71,14 +71,24 @@ int sign(Ed25519Signature signature, Ed25519Key priv_key, Ed25519Key pub_key, u8
 	
 	int err = 0;
 	sha512_t h = {0};
-	if ((err = sha512_le(priv_key, sizeof(Ed25519Key), (u64*) h))) return err;
+	KOCKET_BE_CONVERT(priv_key, sizeof(Ed25519Key));
+	if ((err = sha512(priv_key, sizeof(Ed25519Key), (u64*) h))) return err;
+	KOCKET_BE_CONVERT(priv_key, sizeof(Ed25519Key));
 	
-	u64 r_len = 32;
-	u8* r = concat(4, &r_len, h + 32, 32, data, len);
+	Ed25519Key a = {0};
+	mem_cpy(a, h, sizeof(Ed25519Key));
+	
+	// Prune the buffer
+	a[0] &= ~(0x07);
+	a[31] &= ~(0x80);
+	a[31] |= 0x40;
+	
+	u64 r_len = 0;
+	u8* r = concat(4, &r_len, data, len, h + 32, 32);
 	if (r == NULL) return -KOCKET_IO_ERROR;
 	
 	sha512_t hashed_data = {0};
-	if ((err = sha512_le(r, r_len, (u64*) hashed_data))) {
+	if ((err = sha512(r, r_len, (u64*) hashed_data))) {
 		KOCKET_SAFE_FREE(r);
 		return err;
 	}
@@ -87,35 +97,49 @@ int sign(Ed25519Signature signature, Ed25519Key priv_key, Ed25519Key pub_key, u8
 	
 	// For efficiency, do this by first reducing r modulo L, the group order of B.
 	ECMScalar hashed_data_scalar = ecm_mod(ptr_to_scalar(hashed_data, sizeof(hashed_data)), L);
-	
-	char temp_str[1024] = {0};
-	printf("r: %s\n", to_hex_str(hashed_data_scalar.data, sizeof(hashed_data_scalar.data), temp_str, FALSE));
-	mem_set(temp_str, 0, 1024);
 
 	ECMScalar R = {0};
 	ECMPoint temp_point = {0};
-	compress_point(&R, mul_point(hashed_data_scalar, (ECMPoint*) &base_point, &temp_point));
+	mul_point(hashed_data_scalar, (ECMPoint*) &base_point, &temp_point);
+	compress_point(&R, &temp_point);
+	KOCKET_BE_CONVERT(R.data, sizeof(Ed25519Key));
 
 	u64 K_len = 0;
 	// TODO: Find a way to macro function calculate the count of parameters
-	u8* K = concat(6, &K_len, R.data, sizeof(R), pub_key, sizeof(Ed25519Key), data, len);
+	u8* K = concat(6, &K_len, data, len, pub_key, sizeof(Ed25519Key), R.data, sizeof(Ed25519Key));
 	if (K == NULL) return -KOCKET_IO_ERROR;
 
 	sha512_t k = {0};
+	KOCKET_BE_CONVERT(K, K_len);
 	if ((err = sha512(K, K_len, (u64*) k))) {
 		KOCKET_SAFE_FREE(K);
 		return err;
 	}
+	
+	KOCKET_SAFE_FREE(K);
 
 	// For efficiency, again reduce k modulo L first.
-	ECMScalar k_scalar = ecm_mod(ptr_to_scalar(k, sizeof(k)), L);
-	ECMScalar S = ecm_mod(ecm_add(hashed_data_scalar, ecm_mul(k_scalar, ptr_to_scalar(h, sizeof(Ed25519Key)))), L);
+	ECMScalar S = {0};
+	u8* temp_data[SCALAR_SIZE * 2 + 8] = {0};
+	u8* k_data[SCALAR_SIZE] = {0};
+	BigNum ke_num  = POS_STATIC_BIG_NUM(k, sizeof(k));
+	BigNum k_num  = POS_STATIC_BIG_NUM(k_data, sizeof(Ed25519Key));
+	BigNum a_num  = POS_STATIC_BIG_NUM(a, sizeof(Ed25519Key));
+	BigNum l_num  = POS_STATIC_BIG_NUM(L.data, SCALAR_SIZE);
+	BigNum hd_num = POS_STATIC_BIG_NUM(hashed_data_scalar.data, SCALAR_SIZE);
+	BigNum s_num  = POS_STATIC_BIG_NUM(S.data, SCALAR_SIZE);
+	BigNum res    = POS_STATIC_BIG_NUM(temp_data, SCALAR_SIZE * 2 + 8);
+	
+	if (__chonky_mod(&k_num, &ke_num, &l_num) == NULL) return -KOCKET_IO_ERROR;
+	if (__chonky_mul_s(&res, &k_num, &a_num) == NULL) return -KOCKET_IO_ERROR;
+	__chonky_add(&res, &hd_num, &res);
+	if (__chonky_mod(&s_num, &res, &l_num) == NULL) return -KOCKET_IO_ERROR;
 
+	KOCKET_BE_CONVERT(R.data, sizeof(Ed25519Key));
 	mem_cpy(signature, R.data, sizeof(Ed25519Key));
 	mem_cpy(signature + sizeof(Ed25519Key), S.data, sizeof(Ed25519Key));
 	
-	KOCKET_SAFE_FREE(K);
-	ecm_clean_temp();
+	KOCKET_BE_CONVERT(signature, sizeof(Ed25519Signature));
 
 	return KOCKET_NO_ERROR;
 }
@@ -193,28 +217,30 @@ static Ed25519Key SECRET_KEY_LE = {
     0x60, 0x5a, 0xfd, 0xef, 0x9d, 0xb1, 0x61, 0x9d
 };
 
-static Ed25519Key SECRET_KEY_BE = {
-	0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60,
-	0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
-	0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19,
-	0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60
+static Ed25519Key PUBLIC_KEY_LE = {
+	0x1A, 0x51, 0x07, 0xF7, 0x68, 0x1A, 0x02, 0xAF, 
+	0x25, 0x23, 0xA6, 0xDA, 0xF3, 0x72, 0xE1, 0x0E, 
+	0x3A, 0x07, 0x64, 0xC9, 0xD3, 0xFE, 0x4B, 0xD5, 
+	0xB7, 0x0A, 0xB1, 0x82, 0x01, 0x98, 0x5A, 0xD7
 };
 
-static Ed25519Key PUBLIC_KEY_BE = {
-	0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a, 0xb7,
-	0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64, 0x07, 0x3a,
-	0x0e, 0xe1, 0x72, 0xf3, 0xda, 0xa6, 0x23, 0x25,
-	0xaf, 0x02, 0x1a, 0x68, 0xf7, 0x07, 0x51, 0x1a
+static Ed25519Signature SIGNATURE_LE = {
+	0x0B, 0x10, 0x7A, 0x8E, 0x43, 0x41, 0x51, 0x65,
+   	0x24, 0xBE, 0x5B, 0x59, 0xF0, 0xF5, 0x5B, 0xD2,
+   	0x6B, 0xB4, 0xF9, 0x1C, 0x70, 0x39, 0x1E, 0xC6, 
+	0xAC, 0x3B, 0xA3, 0x90, 0x15, 0x82, 0xB8, 0x5F, 
+	0x55, 0x01, 0x49, 0x22, 0x65, 0xE0, 0x73, 0xD8, 
+	0x74, 0xD9, 0xE5, 0xB8, 0x1E, 0x7F, 0x87, 0x84, 
+	0x8A, 0x82, 0x6E, 0x80, 0xCC, 0xE2, 0x86, 0x90, 
+	0x72, 0xAC, 0x60, 0xC3, 0x00, 0x43, 0x56, 0xE5
 };
 
 int test_ed25519(u8* data, u64 len) {
 	int err = 0;
-	char temp_str[1024] = {0};
 	/* Ed25519Key priv_key = {0}; */
 	/* generate_priv_key(priv_key); */
 	
-	/* printf("Private Key: %s\n", to_hex_str(priv_key, sizeof(Ed25519Key), temp_str, FALSE)); */
-	/* mem_set(temp_str, 0, 1024); */
+	/* PRINT_KEY(priv_key); */
 
 	Ed25519Key pub_key = {0};
 	if ((err = generate_pub_key(pub_key, SECRET_KEY_LE))) {
@@ -222,17 +248,29 @@ int test_ed25519(u8* data, u64 len) {
 		return err;
 	}
 	
-	printf("Public Key: %s\n", to_hex_str(pub_key, sizeof(Ed25519Key), temp_str, FALSE));
-	mem_set(temp_str, 0, 1024);
+	PRINT_KEY(pub_key);
+	PRINT_KEY(PUBLIC_KEY_LE);
 
-	/* Ed25519Signature signature = {0}; */
-	/* if ((err = sign(signature, SECRET_KEY_BE, PUBLIC_KEY_BE, NULL, 0))) { */
-	/* 	ERROR_LOG("Failed to sign.", kocket_status_str[-err]); */
-	/* 	return err; */
-	/* } */
+	// TODO: Temporary check
+	if (mem_cmp(PUBLIC_KEY_LE, pub_key, sizeof(Ed25519Key))) {
+		WARNING_LOG("publick key does not match");
+		return -KOCKET_INVALID_SIGNATURE;
+	}
 
-	/* printf("Signature: %s\n", to_hex_str(signature, sizeof(Ed25519Signature), temp_str, FALSE)); */
-	/* mem_set(temp_str, 0, 1024); */
+	Ed25519Signature signature = {0};
+	if ((err = sign(signature, SECRET_KEY_LE, pub_key, NULL, 0))) {
+		ERROR_LOG("Failed to sign.", kocket_status_str[-err]);
+		return err;
+	}
+
+	PRINT_SIGNATURE(signature);
+	PRINT_SIGNATURE(SIGNATURE_LE);
+	
+	// TODO: Temporary check
+	if (mem_cmp(SIGNATURE_LE, signature, sizeof(Ed25519Signature))) {
+		WARNING_LOG("publick key does not match");
+		return -KOCKET_INVALID_SIGNATURE;
+	}
 	
 	/* if (verify_signature(pub_key, signature, NULL, 0)) { */
 	/* 	printf("Failed to verify the signature.\n"); */

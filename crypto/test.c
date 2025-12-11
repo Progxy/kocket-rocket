@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <openssl/sha.h>
 
 #include "x25519.h"
 #include "ed25519.h"
@@ -68,36 +67,8 @@ int test_sha512(void) {
 
 int main() {
 	int ret = 0;
-	/* if (test_sha512()) return 1; */
+	if (test_sha512()) return 1;
 	
-	sha512_64_t test_hash = {0};
-	/* u8 data[] = "Give me more data"; */
-	/* u8 data[] = { */
-	/* 	0x60, 0x7f, 0xae, 0x1c, 0x03, 0xac, 0x3b, 0x70, */
-	/* 	0x19, 0x69, 0x32, 0x7b, 0x69, 0xc5, 0x49, 0x44, */
-	/* 	0xc4, 0x2c, 0xec, 0x92, 0xf4, 0x4a, 0x84, 0xba, */
-	/* 	0x60, 0x5a, 0xfd, 0xef, 0x9d, 0xb1, 0x61, 0x9d */
-	/* }; */
-
-	u8 data[] = {
-		0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60,
-		0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
-		0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19,
-		0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60
-	};
-
-	printf("Testing SHA-512 custom:\n");
-	if ((ret = sha512(data, sizeof(data), test_hash))) {
-		printf("ERROR::%s: while testing SHA-512.\n", kocket_status_str[-ret]);
-		return ret;
-	}
-
-	PRINT_HASH((u8*) test_hash);
-
-	sha512_t hash_open = {0};
-	SHA512(data, sizeof(data), hash_open);
-	PRINT_HASH(hash_open);	
-
 	printf("Testing ED25519:\n");
 	if ((ret = test_ed25519(NULL, 0))) {
 		printf("ERROR::%s: while testing ED25519.\n", kocket_status_str[-ret]);
