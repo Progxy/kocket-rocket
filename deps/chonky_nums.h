@@ -521,7 +521,7 @@ static u8 chonky_dec_divmod(BigNum* num) {
 
 #define PRINT_CHONKY_NUM(num)     print_chonky_num(#num, num, TRUE)
 #define PRINT_CHONKY_NUM_DEC(num) print_chonky_num(#num, num, FALSE)
-EXPORT_FUNCTION void print_chonky_num(char* name, BigNum* num, bool use_hex) {
+EXPORT_FUNCTION void print_chonky_num(const char* name, const BigNum* num, const bool use_hex) {
 	if (!IS_VALID_BIG_NUM(num)) {
 		WARNING_LOG("Invalid big num.");
 		return;
@@ -709,7 +709,6 @@ CHONKY_FAILABLE static BigNum* __chonky_div(BigNum* quotient, BigNum* remainder,
 	}
 	
 	if (remainder != NULL) {
-		/* copy_chonky_num(remainder, a_c); */
 		mem_cpy(remainder -> data, a_c -> data, remainder -> size);
 	}
 
