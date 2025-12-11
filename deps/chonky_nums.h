@@ -112,8 +112,10 @@ STATIC_ASSERT(sizeof(s64) == 8, "s64 must be 8 bytes");
 #ifdef _CHONKY_NUMS_UTILS_IMPLEMENTATION_
 
 #include <stdarg.h>
+
 #define GET_BIT(val, bit_pos) (((val) >> (bit_pos)) & 0x01)
 
+#ifndef CHONKY_ASSERT
 // TODO: This has to go, as we want to also support kernel modules
 #define CHONKY_ASSERT(condition) chonky_assert(condition, #condition, __FILE__, __LINE__, __func__)
 static void chonky_assert(bool condition, const char* condition_str, const char* file, const int line, const char* func) {
@@ -122,6 +124,8 @@ static void chonky_assert(bool condition, const char* condition_str, const char*
 	abort();
 	return;
 }
+
+#endif //CHONKY_ASSERT
 
 static u8 bit_size(u8 val) {
 	u8 size = 8;
@@ -236,18 +240,6 @@ EXPORT_FUNCTION BigNum* alloc_chonky_num_from_data(u8* data, const u64 size, boo
 CHONKY_FAILABLE static BigNum* dup_chonky_num(const BigNum* num) {
 	BigNum* duped = alloc_chonky_num(num -> data, num -> size, num -> sign);
 	return duped;
-}
-
-CHONKY_FAILABLE static BigNum* copy_chonky_num(BigNum* num, const BigNum* src) {
-	num -> data = (u8*) realloc(num -> data, src -> size * sizeof(u8));
-	if (num -> data == NULL) {
-		WARNING_LOG("Failed to resize data buffer.");
-		return NULL;
-	}
-
-	mem_cpy(num -> data, src -> data, num -> size);
-	
-	return num;
 }
 
 static u64 chonky_real_size(const BigNum* num) {
@@ -617,16 +609,25 @@ static BigNum* __chonky_sub(BigNum* res, const BigNum* a, const BigNum* b) {
 }
 
 CHONKY_FAILABLE static BigNum* __chonky_mul_s(BigNum* res, const BigNum* a, const BigNum* b) {
-	u64 a_size = align_64(chonky_real_size(a));
-	u64 b_size = align_64(chonky_real_size(b));
-	CHONKY_ASSERT(res -> size > (a_size + b_size));
-	
+	u64 a_size = chonky_real_size_64(a);
+	u64 b_size = chonky_real_size_64(b);
+	u64 size = res -> size / 8;
+	CHONKY_ASSERT(size > (a_size + b_size));
+
 	BigNum* res_c = alloc_chonky_num(NULL, res -> size, 0);
 	if (res_c == NULL) return NULL;
 
-	for (u64 i = 0; i < (a_size / 4); ++i) {
-		for (u64 j = 0; j < (b_size / 4); ++j) {
-			*((u128*) (res_c -> data + (i + j) * 4)) += (u64) ((u32*) a -> data)[i] * ((u32*) b -> data)[j];
+	for (u64 i = 0; i < a_size; ++i) {
+		for (u64 j = 0; j < b_size; ++j) {
+			u128 product = ((u128) (a -> data_64)[i]) * (b -> data_64)[j];
+			u64 carry = _addcarry_u64(0, (res_c -> data_64)[i + j], product & 0xFFFFFFFFFFFFFFFF, res_c -> data_64 + i + j);
+			
+			u64 rem = (product >> 64) & 0xFFFFFFFFFFFFFFFF;
+			carry = _addcarry_u64(carry, (res_c -> data_64)[i + j + 1], rem, res_c -> data_64 + i + j + 1);
+			
+			for (u64 t = i + j + 2; carry && t < size; ++t) {
+				carry = _addcarry_u64(carry, (res_c -> data_64)[t], 0, res_c -> data_64 + t);
+			}
 		}
 	}
 	
@@ -652,11 +653,12 @@ static void __chonky_divstep(u64 size_diff, BigNum* a, const BigNum* b, u64 c) {
 	}
 
 	CHONKY_ASSERT(!carry[0] && !carry[1] && !carry[2] && !carry[3] && !carry[4]);
-	if (carry[0] || carry[1] || carry[2] || carry[3] || carry[4]) WARNING_LOG("size_diff: %llu, %llu", size_diff, align_64(chonky_real_size(b)));
 
 	return;
 }
 
+/// TODO: There are some problems when the dividend is less than 8 byte (with
+/// both `a_val` extraction, as well as __chonky_divstep going off bounds)
 CHONKY_FAILABLE static BigNum* __chonky_div(BigNum* quotient, BigNum* remainder, const BigNum* a, const BigNum* b) {
 	// NOTE: We do not support floating point division for now
 	if (chonky_real_size(a) < chonky_real_size(b)) return quotient;
