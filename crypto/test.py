@@ -173,5 +173,7 @@ if __name__ == "__main__":
     print(f"public: {pub_key.hex().upper()}")
     signature = sign(priv_key, b"")
     print(f"signature: {signature.hex().upper()}")
-
+    res = verify(pub_key, b"", signature)
+    assert res == True, "Failed verifying signature"
+    print("Successfully passed verification step")
 

@@ -272,11 +272,13 @@ int test_ed25519(u8* data, u64 len) {
 		return -KOCKET_INVALID_SIGNATURE;
 	}
 	
-	/* if (verify_signature(pub_key, signature, NULL, 0)) { */
-	/* 	printf("Failed to verify the signature.\n"); */
-	/* 	return -KOCKET_INVALID_SIGNATURE; */
-	/* } */
+	if (verify_signature(pub_key, signature, NULL, 0)) {
+		printf("Failed to verify the signature.\n");
+		return -KOCKET_INVALID_SIGNATURE;
+	}
 	
+	DEBUG_LOG("Successfully passed verification step");
+
 	return KOCKET_NO_ERROR;
 }
 
