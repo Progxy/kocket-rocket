@@ -1,87 +1,132 @@
 # Crypto Stack
 
-## Overview
-This extension provides an authenticated, confidential envelope for messages
-transmitted over your existing socket-based communication channel. The design
-follows modern hybrid encryption patterns used in TLS 1.3 / HPKE: ephemeral
-Diffie–Hellman (X25519) to establish shared key material, HKDF-SHA256 to derive
-AEAD key and nonce, ChaCha20-Poly1305 for AEAD encryption, and Ed25519 for
-message signatures.
+## 1. Overview
+This document specifies the cryptographic subsystem used by the socket-based protocol for secure cross-machine communication.
 
-**Key design goals**
-- Confidentiality (AEAD encryption)
-- Authenticity (Ed25519 signatures)
-- Forward secrecy (ephemeral X25519 per message)
-- Deterministic and safe key/nonce derivation (HKDF)
-- Simple replay protection (sequence numbers)
+The protocol provides:
 
-## Cryptographic primitives (standards / RFCs)
-- **X25519** (ECDH) — RFC 7748. Used as the KEM to derive a shared secret between sender ephemeral private key and recipient static public key.
-- **Ed25519** (signatures) — RFC 8032. Used to sign plaintext before encryption (sign-then-encrypt).
-- **HKDF-SHA256** — RFC 5869. Used to derive AEAD key and nonce from the raw shared secret.
-- **ChaCha20-Poly1305** (AEAD) — RFC 8439. Used for authenticated encryption of the signed plaintext.
-- **HPKE** (concept: KEM + KDF + AEAD) — RFC 9180. Use HPKE for a formalized API; this design follows the same pattern.
+- Confidentiality  
+- Sender authentication  
+- Integrity  
+- Forward secrecy  
+- Replay resistance  
 
-## Wire format
+The design is based on modern, standardized primitives:
 
-All integers are little-endian unless otherwise noted.
+- **X25519** for Diffie–Hellman key agreement (RFC 7748)  
+- **Ed25519** for digital signatures (RFC 8032)  
+- **HKDF-SHA256** for key derivation (RFC 5869)  
+- **ChaCha20-Poly1305** for authenticated encryption (RFC 8439)  
 
-Fields of Crypto Structure:
-- `version` — Protocol version (currently `0x01`)
-- `flags` — reserved (for future use)
-- `eph_pub` — ephemeral X25519 public key (32 bytes)
-- `sender_ed25519_pub` — sender's Ed25519 public key (32 bytes) (optional if you manage pubkeys out-of-band)
-- `seq` — 8-byte sequence number (unsigned integer). Use per-sender monotonic sequence for replay protection
-- `aad_len` — 2-byte length of AAD
-- `aad` — Associated Authenticated Data (e.g., channel identifiers, protocol version, etc.)
-- `ciphertext_and_tag` — AEAD output (variable)
+The protocol follows the *KEM → KDF → AEAD* structure formalized in **HPKE** (RFC 9180).
 
-## Sender flow (Encrypt)
-1. **Sign**: `sig = Ed25519(signing_priv, message)` (RFC 8032)  
-   `signed_plaintext = sig || message`
+---
 
-2. **Ephemeral key**: generate ephemeral X25519 key pair `(eph_priv, eph_pub)` (RFC 7748).
+## 2. Cryptographic Roles
+### 2.1 Long-term recipient key
+Each participant that receives encrypted messages possesses a **static X25519 keypair**:
 
-3. **ECDH**: `shared = X25519(eph_priv, recipient_static_pub)` (raw 32 bytes).
+- Private key: kept secret  
+- Public key: distributed to peer systems and used for encryption  
 
-4. **KDF**: Derive AEAD key and nonce via HKDF-SHA256:
-    HKDF(salt=None, info = protocol_id || sender_pub || recipient_pub || seq) -> key (32 bytes) || nonce (12 bytes) (RFC 5869)
+### 2.2 Long-term sender identity key
+Each participant possesses a **static Ed25519 keypair**:
 
-5. **AEAD encrypt**: `ciphertext = ChaCha20-Poly1305(key).encrypt(nonce, signed_plaintext, aad)` (RFC 8439).
+- Private key: used to sign messages  
+- Public key: transmitted in the wire format for sender identification  
 
-6. **Wire**: transmit `version||flags||eph_pub||sender_ed25519_pub||seq||aad_len||aad||ciphertext`.
+### 2.3 Ephemeral sender key
+For every encrypted message, the sender generates a **fresh ephemeral X25519 keypair** to ensure forward secrecy.
 
-## Recipient flow (Decrypt)
-1. Parse wire, extract `eph_pub`, `sender_ed25519_pub`, `seq`, `aad`, `ciphertext`.
+---
 
-2. Validate `seq` against expected sequence number(s) to mitigate replay.
+## 3. High-Level Protocol Flow
+### 3.1 Sender Procedure
 
-3. Compute `shared = X25519(recipient_priv, eph_pub)`.
+1. **Message signing**  
+   `signed_message = signature || plaintext` (Ed25519, RFC 8032)
 
-4. Derive key and nonce via the same HKDF parameters.
+2. **Ephemeral key creation**  
+   Generate ephemeral X25519 keypair (RFC 7748)
 
-5. AEAD decrypt to obtain `signed_plaintext`.
+3. **Shared secret derivation**  
+   shared_secret = X25519(ephemeral_priv, recipient_static_pub)
 
-6. Split signature and message (`sig || message`) and verify `Ed25519` signature using `sender_ed25519_pub`.
+4. **Key derivation (HKDF-SHA256, RFC 5869)**  
+- Input keying material (IKM): `shared_secret`  
+- Salt: None  
+- Info: 
+  ```
+  "X25519-CHACHA20POLY1305-v1" || sender_ed25519_pub || recipient_x25519_pub || sequence_number
+  ```
+- Output: `aead_key (32 bytes) || aead_nonce (12 bytes)`
 
-## Design choices and rationale
-- **Sign-then-encrypt**: We sign the plaintext (not the ciphertext). This allows the recipient to verify the message origin and integrity even after decryption, and avoids some pitfalls of attempting to sign ciphertext which may leak structure.
-- **Ephemeral X25519**: Ephemeral per-message key affords forward secrecy: a compromise of recipient static key does not reveal past messages.
-- **HKDF for key + nonce**: Using HKDF ties the AEAD key and nonce to the shared secret in a standardized, auditable way. Including `sender_pub || recipient_pub || seq` inside `info` prevents key reuse across different contexts.
-- **Sequence numbers**: Basic replay protection. Consider a window and reordering policy for higher performance networks.
+5. **Authenticated encryption (ChaCha20-Poly1305, RFC 8439)**  
+    ciphertext = ChaCha20Poly1305(aead_key).encrypt(aead_nonce, signed_message, aad)
 
-## Security cautions & operational recommendations
-- **Authenticate static public keys**: To prevent MITM, the recipient static public key must be verified/pinned by the sender (PKI, certificates, or pre-shared). HPKE's auth modes or TLS-style certificates address this.
-- **Nonce management**: Nonce uniqueness is critical for ChaCha20-Poly1305. With ephemeral per-message keys derived from ECDH, deterministic nonce derivation via HKDF is safe because the key is unique per ephemeral. If you switch to reusing ephemeral keys for multiple messages, derive nonces using a counter or choose XChaCha20-Poly1305 with safe randomness.
-- **Protect private keys**: Guard long-term private keys in secure storage (HSM, TPM, or OS-protected memory). If handling keys in kernel space, limit exposure and use kernel crypto APIs if available; prefer userland libraries.
-- **RNG**: Use a CSPRNG for ephemeral keys and any random nonces. On Linux, use `getrandom()`/`os.urandom()`.
+6. **Wire message construction**  
+See [§4](#4.-Wire-Format-Specification).
 
-## Interoperability & alternatives
-- **HPKE (RFC 9180)** is a full standard that formalizes KEM+KDF+AEAD patterns. Consider using an HPKE library instead of a custom ad-hoc packing if you want features like authenticated mode and KEM/KDF recipes.
-- **TLS 1.3** offers a mature handshake and record layer; if you need sessions, renegotiation, and certificate-based authentication, TLS 1.3 is a robust alternative.
-- **libsodium** and `crypto_box` / `crypto_kx` provide simpler high-level APIs for common tasks and are recommended if you want fewer low-level choices.
+### 3.2 Recipient Procedure
+1. Parse wire message and extract: ephemeral_pub, sequence_number, sender_pub, ciphertext, AAD.  
+2. Validate sequence number for replay protection.  
+3. Compute shared secret: shared_secret = X25519(recipient_priv, ephemeral_pub)
+4. Derive AEAD key and nonce via HKDF-SHA256.  
+5. Decrypt ciphertext with ChaCha20-Poly1305 using provided AAD.  
+6. Split signature and message (`signature || plaintext`).  
+7. Verify Ed25519 signature using sender public key.  
+8. Deliver plaintext to upper layers.
 
-## References
+---
+
+## 4. Wire Format Specification
+All integers are **little-endian**.
+
++-----------------------------------+
+| Field                | Size       |
+|----------------------|------------|
+| version              | (1 byte)   |
+| flags                | (1 byte)   |
+| ephemeral_x25519_pub | (32 bytes) |
+| sender_ed25519_pub   | (32 bytes) |
+| sequence_number      | (8 bytes)  |
+| aad_length           | (2 bytes)  |
+| aad                  | (variable) |
+| ciphertext_and_tag   | (variable) |
++-----------------------------------+
+
++----------------------------------------------------------------------------------------+
+| Field                | Description                                                     |
+|----------------------|-----------------------------------------------------------------|
+| version              | Protocol version                                                |
+| flags                | Reserved for future extensions                                  |
+| ephemeral_x25519_pub | Ephemeral public key for forward secrecy (RFC 7748)             |
+| sender_ed25519_pub   | Sender identity key (RFC 8032)                                  |
+| sequence_number      | Monotonic counter for replay protection                         |
+| aad_length           | Length of AAD in bytes                                          |
+| aad                  | Application-controlled Associated Authenticated Data            |
+| ciphertext_and_tag   | ChaCha20-Poly1305 ciphertext with authentication tag (RFC 8439) |
++----------------------------------------------------------------------------------------+
+
+---
+
+## 5. Replay Protection
+- Sequence number is incremented for each message.  
+- Recipient maintains the highest accepted sequence number per peer.  
+- Messages with sequence numbers ≤ last accepted are rejected.
+
+---
+
+## 6. Security Properties
+- **Confidentiality**: ChaCha20-Poly1305 AEAD  
+- **Integrity & authenticity**: AEAD + Ed25519 signature  
+- **Forward secrecy**: ephemeral X25519 keys  
+- **Key compromise impersonation (KCI) resistance**: AEAD keys are ephemeral per message  
+- **Nonce uniqueness**: Derived deterministically from unique ephemeral secrets
+
+---
+
+## 7. References
  - [RFC 7748](https://datatracker.ietf.org/doc/html/rfc7748) — Elliptic Curves for Security (Curve25519 / X25519)
  - [RFC 8032](https://datatracker.ietf.org/doc/html/rfc8032) — Edwards-Curve Digital Signature Algorithm (Ed25519)
  - [RFC 5869](https://datatracker.ietf.org/doc/html/rfc5869) — HMAC-based Extract-and-Expand Key Derivation Function (HKDF)
