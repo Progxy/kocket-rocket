@@ -4,6 +4,7 @@
 #define _KOCKET_SPECIAL_TYPE_SUPPORT_
 #define _KOCKET_UTILS_IMPLEMENTATION_
 #define _KOCKET_PRINTING_UTILS_
+#define _KOCKET_NO_PERROR_SUPPORT_
 #include "../kocket_utils.h"
 #include "./chacha20.h"
 #include "./sha512.h"
@@ -84,7 +85,7 @@ int sign(Ed25519Signature signature, Ed25519Key priv_key, Ed25519Key pub_key, u8
 	a[31] |= 0x40;
 	
 	u64 r_len = 0;
-	u8* r = concat(4, &r_len, data, len, h + 32, 32);
+	u8* r = concat(4, &r_len, h + 32, 32, data, len);
 	if (r == NULL) return -KOCKET_IO_ERROR;
 	
 	sha512_t hashed_data = {0};
@@ -94,7 +95,7 @@ int sign(Ed25519Signature signature, Ed25519Key priv_key, Ed25519Key pub_key, u8
 	}
 	
 	KOCKET_SAFE_FREE(r);
-	
+
 	// For efficiency, do this by first reducing r modulo L, the group order of B.
 	ECMScalar hashed_data_scalar = ecm_mod(ptr_to_scalar(hashed_data, sizeof(hashed_data)), L);
 
@@ -106,11 +107,13 @@ int sign(Ed25519Signature signature, Ed25519Key priv_key, Ed25519Key pub_key, u8
 
 	u64 K_len = 0;
 	// TODO: Find a way to macro function calculate the count of parameters
-	u8* K = concat(6, &K_len, data, len, pub_key, sizeof(Ed25519Key), R.data, sizeof(Ed25519Key));
+	u8* K = concat(6, &K_len, R.data, sizeof(Ed25519Key), pub_key, sizeof(Ed25519Key), data, len);
 	if (K == NULL) return -KOCKET_IO_ERROR;
 
+	KOCKET_BE_CONVERT(K, sizeof(Ed25519Key));
+	KOCKET_BE_CONVERT(K + sizeof(Ed25519Key), sizeof(Ed25519Key));
+	
 	sha512_t k = {0};
-	KOCKET_BE_CONVERT(K, K_len);
 	if ((err = sha512(K, K_len, (u64*) k))) {
 		KOCKET_SAFE_FREE(K);
 		return err;
@@ -152,7 +155,6 @@ int verify_signature(Ed25519Key pub_key, Ed25519Signature signature, u8* data, u
 		return -KOCKET_INVALID_SIGNATURE;
 	}
 
-
 	ECMScalar R = {0};
 	ECMScalar S = {0};
 	mem_cpy(S.data, signature, sizeof(Ed25519Key));
@@ -170,12 +172,13 @@ int verify_signature(Ed25519Key pub_key, Ed25519Signature signature, u8* data, u
 
 	int err = 0;
 	u64 K_len = 0;
-	u8* K = concat(6, &K_len, data, len, pub_key, sizeof(Ed25519Key), R.data, sizeof(Ed25519Key));
+	u8* K = concat(6, &K_len, R.data, sizeof(Ed25519Key), pub_key, sizeof(Ed25519Key), data, len);
 	if (K == NULL) return -KOCKET_IO_ERROR;
 
+	KOCKET_BE_CONVERT(K, sizeof(Ed25519Key));
+	KOCKET_BE_CONVERT(K + sizeof(Ed25519Key), sizeof(Ed25519Key));
+	
 	sha512_t k = {0};
-	KOCKET_BE_CONVERT(K, K_len);
-
 	if ((err = sha512(K, K_len, (u64*) k))) {
 		KOCKET_SAFE_FREE(K);
 		return err;
@@ -235,9 +238,10 @@ static Ed25519Signature SIGNATURE_LE = {
 
 int test_ed25519(u8* data, u64 len) {
 	int err = 0;
-	/* Ed25519Key priv_key = SECRET_KEY_LE; */
 	Ed25519Key priv_key = {0};
-	generate_priv_key(priv_key);
+	
+	if (data == NULL) mem_cpy(priv_key, SECRET_KEY_LE, sizeof(Ed25519Key));
+	else generate_priv_key(priv_key);
 	
 	PRINT_KEY(priv_key);
 
@@ -248,30 +252,35 @@ int test_ed25519(u8* data, u64 len) {
 	}
 	
 	PRINT_KEY(pub_key);
-	/* PRINT_KEY(PUBLIC_KEY_LE); */
+	
+	if (data == NULL) {
+		PRINT_KEY(PUBLIC_KEY_LE);
 
-	/* // TODO: Temporary check */
-	/* if (mem_cmp(PUBLIC_KEY_LE, pub_key, sizeof(Ed25519Key))) { */
-	/* 	WARNING_LOG("publick key does not match"); */
-	/* 	return -KOCKET_INVALID_SIGNATURE; */
-	/* } */
+		// TODO: Temporary check
+		if (mem_cmp(PUBLIC_KEY_LE, pub_key, sizeof(Ed25519Key))) {
+			WARNING_LOG("publick key does not match");
+			return -KOCKET_INVALID_SIGNATURE;
+		}
+	}
 
 	Ed25519Signature signature = {0};
-	if ((err = sign(signature, priv_key, pub_key, NULL, 0))) {
+	if ((err = sign(signature, priv_key, pub_key, data, len))) {
 		ERROR_LOG("Failed to sign.", kocket_status_str[-err]);
 		return err;
 	}
 
 	PRINT_SIGNATURE(signature);
-	/* PRINT_SIGNATURE(SIGNATURE_LE); */
 	
-	/* // TODO: Temporary check */
-	/* if (mem_cmp(SIGNATURE_LE, signature, sizeof(Ed25519Signature))) { */
-	/* 	WARNING_LOG("publick key does not match"); */
-	/* 	return -KOCKET_INVALID_SIGNATURE; */
-	/* } */
-	
-	if (verify_signature(pub_key, signature, NULL, 0)) {
+	if (data == NULL) {
+		PRINT_SIGNATURE(SIGNATURE_LE);
+		
+		if (mem_cmp(SIGNATURE_LE, signature, sizeof(Ed25519Signature))) {
+			WARNING_LOG("publick key does not match");
+			return -KOCKET_INVALID_SIGNATURE;
+		}
+	}
+
+	if (verify_signature(pub_key, signature, data, len)) {
 		printf("Failed to verify the signature.\n");
 		return -KOCKET_INVALID_SIGNATURE;
 	}

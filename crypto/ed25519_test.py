@@ -144,7 +144,9 @@ def secret_to_public(secret):
 def sign(secret, msg):
     a, prefix = secret_expand(secret)
     A = point_compress(point_mul(a, G))
+    
     r = sha512_modq(prefix + msg)
+
     R = point_mul(r, G)
     Rs = point_compress(R)
     h = sha512_modq(Rs + A + msg)
@@ -179,12 +181,14 @@ def verify(public, msg, signature):
     return point_equal(sB, R_k_A)
 
 if __name__ == "__main__":
+    msg = b"abcdefghi"
+    print(f"msg: {msg}")
     priv_key = bytes.fromhex("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60")
     pub_key = secret_to_public(priv_key)
     print(f"public: {pub_key.hex().upper()}")
-    signature = sign(priv_key, b"")
+    signature = sign(priv_key, msg)
     print(f"signature: {signature.hex().upper()}")
-    res = verify(pub_key, b"", signature)
+    res = verify(pub_key, msg, signature)
     assert res == True, "Failed verifying signature"
     print("Successfully passed verification step")
 

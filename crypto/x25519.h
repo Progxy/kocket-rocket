@@ -4,8 +4,8 @@
 #define _KOCKET_SPECIAL_TYPE_SUPPORT_
 #define _KOCKET_UTILS_IMPLEMENTATION_
 #define _KOCKET_PRINTING_UTILS_
+#define _KOCKET_NO_PERROR_SUPPORT_
 #include "../kocket_utils.h"
-
 
 /* Reference [RFC 7748](https://datatracker.ietf.org/doc/html/rfc7748) */
 

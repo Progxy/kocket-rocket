@@ -58,7 +58,9 @@
 
 	#define COLOR_STR(str, COLOR) COLOR str RESET_COLOR
 
-	#include "./str_error.h"
+	#ifndef _KOCKET_NO_PERROR_SUPPORT_
+		#include "./str_error.h"
+	#endif //_KOCKET_NO_PERROR_SUPPORT_
 	
 	#ifdef _K_KOCKET_H_
 		#define ERROR_LOG(fmt, error_str, ...) printk(KERN_ERR "ERROR:%s:(" __FILE__ ":%u): " fmt "\n", error_str, __LINE__,  ##__VA_ARGS__)
@@ -198,7 +200,7 @@ static void mem_set_var(void* ptr, int value, size_t size, size_t val_size) {
 	return;
 }
 
-static char* to_hex_str(u8* val, unsigned int size, char* str, bool use_space) {
+UNUSED_FUNCTION static char* to_hex_str(u8* val, unsigned int size, char* str, bool use_space) {
 	unsigned int i = 0;
     for (int j = size - 1; j >= 0; i += 2 + use_space, --j) {
         str[i] = HEX_TO_CHR_CAP((val[j] >> 4) & 0xF);

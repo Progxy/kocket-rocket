@@ -69,11 +69,24 @@ int main() {
 	int ret = 0;
 	if (test_sha512()) return 1;
 	
-	printf("Testing ED25519:\n");
+	printf("\n-----------------------------------------\n\n");
+
+	u8 data[] = "abcdefghi";
+	printf("Testing ED25519 (null message with checks):\n");
 	if ((ret = test_ed25519(NULL, 0))) {
 		printf("ERROR::%s: while testing ED25519.\n", kocket_status_str[-ret]);
 		return ret;
 	}
+	
+	printf("\n-----------------------------------------\n\n");
+
+	printf("Testing ED25519 (with message):\n");
+	if ((ret = test_ed25519(data, sizeof(data) - 1))) {
+		printf("ERROR::%s: while testing ED25519.\n", kocket_status_str[-ret]);
+		return ret;
+	}
+	
+	printf("\n-----------------------------------------\n\n");
 	
 	printf("Testing X25519:\n");
 	if ((ret = x25519(NULL))) {
