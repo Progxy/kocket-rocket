@@ -82,7 +82,6 @@ See [§4](#4.-Wire-Format-Specification).
 ## 4. Wire Format Specification
 All integers are **little-endian**.
 
-+-----------------------------------+
 | Field                | Size       |
 |----------------------|------------|
 | version              | (1 byte)   |
@@ -93,9 +92,7 @@ All integers are **little-endian**.
 | aad_length           | (2 bytes)  |
 | aad                  | (variable) |
 | ciphertext_and_tag   | (variable) |
-+-----------------------------------+
 
-+----------------------------------------------------------------------------------------+
 | Field                | Description                                                     |
 |----------------------|-----------------------------------------------------------------|
 | version              | Protocol version                                                |
@@ -106,7 +103,6 @@ All integers are **little-endian**.
 | aad_length           | Length of AAD in bytes                                          |
 | aad                  | Application-controlled Associated Authenticated Data            |
 | ciphertext_and_tag   | ChaCha20-Poly1305 ciphertext with authentication tag (RFC 8439) |
-+----------------------------------------------------------------------------------------+
 
 ---
 
