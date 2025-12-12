@@ -82,18 +82,23 @@ modp_sqrt_m1 = pow(2, (p-1) // 4, p)
 def recover_x(y, sign):
     if y >= p: return None
     
-    x2 = (y*y-1) * modp_inv(d*y*y+1)
+    u = y * y - 1
+    v = d * y * y + 1
+
+    x2 = u * modp_inv(v)
     if x2 == 0:
         if sign: return None
         else:    return 0
 
     # Compute square root of x2
     x = pow(x2, (p+3) // 8, p)
+
     if (x*x - x2) % p != 0: x = x * modp_sqrt_m1 % p
+    
     if (x*x - x2) % p != 0: return None
 
     if (x & 1) != sign: x = p - x
-    
+        
     return x
 
 # Base point
@@ -117,8 +122,9 @@ def point_decompress(s):
     y &= (1 << 255) - 1
 
     x = recover_x(y, sign)
+
     if x is None: return None
-    else: return (x, y, 1, x*y % p)
+    return (x, y, 1, x*y % p)
 
 ## These are functions for manipulating the private key.
 
@@ -153,8 +159,9 @@ def verify(public, msg, signature):
     
     A = point_decompress(public)
     if not A: return False
-    
+        
     Rs = signature[:32]
+    
     R = point_decompress(Rs)
     if not R: return False
     
@@ -162,10 +169,14 @@ def verify(public, msg, signature):
     if s >= q: return False
     
     h = sha512_modq(Rs + public + msg)
-    sB = point_mul(s, G)
-    hA = point_mul(h, A)
     
-    return point_equal(sB, point_add(R, hA))
+    sB = point_mul(s, G)
+   
+    hA = point_mul(h, A)
+
+    R_k_A = point_add(R, hA)
+    
+    return point_equal(sB, R_k_A)
 
 if __name__ == "__main__":
     priv_key = bytes.fromhex("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60")

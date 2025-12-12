@@ -4,9 +4,11 @@
 #define CHONKY_ASSERT(cond) __ecm_assert(cond, #cond, __FILE__, __LINE__, __func__)
 
 static void __ecm_assert(bool cond, const char* cond_str, const char* file, const unsigned int line, const char* func_name) {
-	if (!cond) {
-		WARNING_LOG(COLOR_STR("%s:%u: ", WARNING_COLOR) "Failed to assert the following condition: " COLOR_STR("'%s'", BLUE) " in function " COLOR_STR("'%s'", PURPLE), file, line, cond_str, func_name);
-	}
+	if (cond) return;
+
+	WARNING_LOG(COLOR_STR("%s:%u: ", WARNING_COLOR) "Failed to assert the following condition: " COLOR_STR("'%s'", BLUE) " in function " COLOR_STR("'%s'", PURPLE), file, line, cond_str, func_name);
+	abort();
+	
 	return;
 }
 
@@ -15,14 +17,10 @@ static void __ecm_assert(bool cond, const char* cond_str, const char* file, cons
 #define GET_SCALAR_BIT(val, n) ((((val).data[(((n) - ((n) % 8)) / 8)]) >> ((n) % 8)) & 0x01)
 
 #define SCALAR_SIZE 64
+#define LITTLE_SCALAR_SIZE 32
 typedef struct {
 	u8 data[SCALAR_SIZE];
 } ECMScalar;
-
-typedef struct ECMCoord {
-	ECMScalar x;
-	ECMScalar y;
-} ECMCoord;
 
 typedef struct ECMPoint {
 	ECMScalar x;
@@ -142,6 +140,14 @@ static const ECMScalar decoding_exp_two = {
 	}
 };
 
+static const ECMScalar decoding_exp_magic = {
+	.data = {
+		0xFE, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 
+		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 
+		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x0F
+	}
+};
+
 static const ECMScalar invalid_scalar = { 0 };
 
 #define ECM_PRINT_POINT(point) ecm_print_point(#point, point)
@@ -188,6 +194,7 @@ void ecm_clean_temp(void) {
 	return;
 }
 
+/// TODO: Should rewrite most of the code for readability, and furthermore also for optimizations!!!
 // TODO: Pass int for err handling
 // TODO: Find a way to maintain the sugar syntax, while performing error
 //       handling (and maybe possibly also avoid repetitive temp allocations)
@@ -237,7 +244,8 @@ ECMScalar ecm_sub(ECMScalar a, ECMScalar b) {
 	BigNum b_num = POS_STATIC_BIG_NUM(b.data, SCALAR_SIZE);
 	BigNum p_num = POS_STATIC_BIG_NUM(p.data, SCALAR_SIZE);
 	BigNum res   = POS_STATIC_BIG_NUM((temp_scalar -> value).data, SCALAR_SIZE);
-	res.sign = !chonky_is_gt(&a_num, &b_num);
+	
+	res.sign = !chonky_is_gte(&a_num, &b_num);
 	
 	__chonky_sub(&res, &a_num, &b_num);
 		
@@ -281,6 +289,8 @@ ECMScalar ecm_mul(ECMScalar a, ECMScalar b) {
 	return temp_scalar -> value;
 }
 
+
+#define ecm_inv(scalar) ecm_spow(scalar, p_minus_2)
 ECMScalar ecm_spow(ECMScalar a, ECMScalar exp) {
 	ECMTempScalar* temp_scalar = calloc(1, sizeof(ECMTempScalar));
 	if (temp_scalar == NULL) {
@@ -322,7 +332,6 @@ ECMScalar ecm_pow(ECMScalar a, u64 exp) {
 	BigNum exp_num = POS_STATIC_BIG_NUM(&exp, 8);
 	BigNum res     = POS_STATIC_BIG_NUM((temp_scalar -> value).data, SCALAR_SIZE);
 
-	// TODO: Error is actually in here mf
 	if (__chonky_pow_mod_mersenne(&res, &a_num, &exp_num, &p_num) == NULL) return invalid_scalar;
 	
 	return temp_scalar -> value;
@@ -377,6 +386,7 @@ bool ecm_iseq(ECMScalar a, ECMScalar b) {
 	return TRUE;
 }
 
+// TODO: Fix/Optimize the gt and gt_eq loops for early exit detection
 bool ecm_is_gt(ECMScalar a, ECMScalar b) {
 	for (int i = sizeof(ECMScalar) - 1; i >= 0; --i) {
 		if (a.data[i] <= b.data[i]) return FALSE;
@@ -384,6 +394,7 @@ bool ecm_is_gt(ECMScalar a, ECMScalar b) {
 	return TRUE;
 }
 
+/// TODO: rename to ecm_is_gte
 bool ecm_is_gt_eq(ECMScalar a, ECMScalar b) {
 	for (int i = sizeof(ECMScalar) - 1; i >= 0; --i) {
 		if (a.data[i] < b.data[i]) return FALSE;
@@ -392,26 +403,22 @@ bool ecm_is_gt_eq(ECMScalar a, ECMScalar b) {
 }
 
 bool is_point_eq(ECMPoint* a, ECMPoint* b) {
-	return (
-		ecm_iseq(a -> x, b -> x) && 
-		ecm_iseq(a -> y, b -> y) && 
-		ecm_iseq(a -> z, b -> z) && 
-		ecm_iseq(a -> t, b -> t)
-	);
-}
+	const ECMScalar zero = {0};
+	ECMScalar cond_a = ecm_sub(ecm_mul(a -> x, b -> z), ecm_mul(b -> x, a -> z));
+	if (!ecm_iseq(cond_a, zero)) { 
+		ecm_clean_temp();
+		return FALSE;
+	}
 
-ECMPoint* coord_to_point(ECMCoord* coord, ECMPoint* point) {
-	mem_cpy((point -> x).data, (coord -> x).data, sizeof(ECMScalar));
-	mem_cpy((point -> y).data, (coord -> y).data, sizeof(ECMScalar));
-	
-	mem_set((point -> z).data, 0, sizeof(ECMScalar));
-	((point -> z).data)[0] = 1;
-	
-	mem_cpy((point -> t).data, ecm_mul(coord -> x, coord -> y).data, sizeof(ECMScalar));
-	
+	ECMScalar cond_b = ecm_sub(ecm_mul(a -> y, b -> z), ecm_mul(b -> y, a -> z));
+	if (!ecm_iseq(cond_b, zero)) {
+		ecm_clean_temp();
+		return FALSE;
+	}
+
 	ecm_clean_temp();
 
-	return point;
+	return TRUE;
 }
 
 // TODO: Is clear that we trade between code elegance and clarity with a bit of
@@ -529,7 +536,7 @@ ECMPoint* mul_point(ECMScalar scalar, ECMPoint* P, ECMPoint* R) {
 }
 
 void compress_point(ECMScalar* res, ECMPoint* point) {
-	ECMScalar z_inv = ecm_spow(point -> z, p_minus_2);
+	ECMScalar z_inv = ecm_inv(point -> z);
 	ECMScalar x = ecm_mul(point -> x, z_inv);
 	ECMScalar y = ecm_mul(point -> y, z_inv);
 
@@ -541,11 +548,13 @@ void compress_point(ECMScalar* res, ECMPoint* point) {
 	return;
 }
 
-ECMCoord* decode_point(ECMScalar scalar) {
-	u8 x_0 = GET_SCALAR_BIT(scalar, 31 * 8 + 7);
-	
+// TODO: Maybe should rewrite the squaring powers into simple "a*a" multiplications
+ECMPoint* decode_point(ECMScalar scalar, ECMPoint* point) {
 	ECMScalar y = {0};
-	mem_cpy(y.data, scalar.data, sizeof(ECMScalar));
+	mem_cpy(y.data, scalar.data, LITTLE_SCALAR_SIZE);
+	KOCKET_BE_CONVERT(y.data, LITTLE_SCALAR_SIZE);
+	
+	u8 sign = GET_SCALAR_BIT(y, 31 * 8 + 7);
 	y.data[31] &= ~(0x80);
 
 	if (ecm_is_gt(y, p)) {
@@ -555,45 +564,43 @@ ECMCoord* decode_point(ECMScalar scalar) {
 
 	ECMScalar u = ecm_sub(ecm_pow(y, 2), base_point.z);
 	ECMScalar v = ecm_add(ecm_mul(d, ecm_pow(y, 2)), base_point.z);
-	
-	// TODO: recover x
-	ECMScalar x = ecm_mul(ecm_mul(u, (ecm_pow(v, 3))), ecm_spow(ecm_mul(u, ecm_pow(v, 7)), decoding_exp));
+	ECMScalar x2 = ecm_mul(u, ecm_inv(v));
 
-	if (ecm_iseq(ecm_mul(v, ecm_pow(x, 2)), ecm_neg(u))) {
+	const ECMScalar zero = {0};
+	if (ecm_iseq(x2, zero) && sign) {
+		ecm_clean_temp();
+		WARNING_LOG("Failed to decode point, as x2 cannot be zero.");
+		return NULL;
+	}
+
+	ECMScalar x = ecm_spow(x2, decoding_exp_magic);
+
+	if (!ecm_iseq(ecm_sub(ecm_pow(x, 2), x2), zero)) {
 		// Set x <-- x * 2^((p-1)/4), which is a square root.
 		x = ecm_mul(x, ecm_spow(two, decoding_exp_two));
-	} else if (!ecm_iseq(ecm_mul(v, ecm_pow(x, 2)), u)) {
+	} 
+
+	if (!ecm_iseq(ecm_sub(ecm_pow(x, 2), x2), zero)) {
 		// No square root exists for modulo p
 		ecm_clean_temp();
 		WARNING_LOG("Failed to decode point, as no square root exists for modulo p.");
 		return NULL;
 	}
-
-	const ECMScalar zero = {0};
-	if (ecm_iseq(x, zero) && (x_0 == 1)) {
-	    // If x = 0, and x_0 = 1, decoding fails.  
-		ecm_clean_temp();
-		WARNING_LOG("Failed to decode point, x = 0, and x_0 = 1.");
-		return NULL;
-	} else if (GET_SCALAR_BIT(x, 0) != x_0) {
-		// Otherwise, if x_0 != x mod 2, set x <-- p - x.  
-		x = ecm_sub(x, p);
-	}
 	
-	ECMCoord* coord = calloc(1, sizeof(ECMCoord));
-	if (coord == NULL) {
-		ecm_clean_temp();
-		WARNING_LOG("Failed to allocate coord buffer.");
-		return NULL;
+	if (GET_SCALAR_BIT(x, 0) != sign) {
+		// Otherwise, if sign != x mod 2, set x <-- p - x.  
+		x = ecm_sub(p, x);
 	}
 
-	mem_cpy((coord -> x).data, x.data, sizeof(ECMScalar));
-	mem_cpy((coord -> y).data, y.data, sizeof(ECMScalar));
+	mem_cpy((point -> x).data, x.data,   sizeof(ECMScalar));
+	mem_cpy((point -> y).data, y.data,   sizeof(ECMScalar));
+	(point -> z).data[0] = 1;
+	mem_cpy((point -> t).data, ecm_mul(point -> x, point -> y).data, sizeof(ECMScalar));
 
 	// Clean only after copying as x and y are temp scalars
 	ecm_clean_temp();
 
-	return coord;
+	return point;
 }
 
 #endif //_ECM_OPS_H_

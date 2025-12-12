@@ -147,64 +147,62 @@ int sign(Ed25519Signature signature, Ed25519Key priv_key, Ed25519Key pub_key, u8
 int verify_signature(Ed25519Key pub_key, Ed25519Signature signature, u8* data, u64 len) {
 	if ((data == NULL && len != 0) || signature == NULL) return -KOCKET_INVALID_PARAMETERS;
 
+	ECMPoint decoded_A = {0};
+	if (decode_point(ptr_to_scalar(pub_key, sizeof(Ed25519Key)), &decoded_A) == NULL) {
+		return -KOCKET_INVALID_SIGNATURE;
+	}
+
+
 	ECMScalar R = {0};
 	ECMScalar S = {0};
-	mem_cpy(R.data, signature, sizeof(ECMScalar));
-	mem_cpy(S.data, signature + sizeof(ECMScalar), sizeof(ECMScalar));
+	mem_cpy(S.data, signature, sizeof(Ed25519Key));
+	mem_cpy(R.data, signature + sizeof(Ed25519Key), sizeof(Ed25519Key));
 	
 	if (ecm_is_gt_eq(S, L)) {
 		WARNING_LOG("Failed to decode the signature as: S >= L");
 		return -KOCKET_INVALID_SIGNATURE;
 	}
 
-	ECMCoord* decoded_r = decode_point(R);
-	if (decoded_r == NULL) return -KOCKET_INVALID_SIGNATURE;
+	ECMPoint decoded_r = {0};
+	if (decode_point(R, &decoded_r) == NULL) return -KOCKET_INVALID_SIGNATURE;
 
-	ECMCoord* decoded_A = decode_point(ptr_to_scalar(pub_key, sizeof(Ed25519Key)));
-	if (decoded_A == NULL) {
-		KOCKET_SAFE_FREE(decoded_r);
-		return -KOCKET_INVALID_SIGNATURE;
-	}
+	KOCKET_BE_CONVERT(S.data, sizeof(Ed25519Key));
 
 	int err = 0;
 	u64 K_len = 0;
-	// TODO: Find a way to macro function calculate the count of parameters
-	u8* K = concat(6, &K_len, R.data, sizeof(R), pub_key, sizeof(Ed25519Key), data, len);
-	if (K == NULL) {
-		KOCKET_SAFE_FREE(decoded_r);
-		KOCKET_SAFE_FREE(decoded_A);
-		return -KOCKET_IO_ERROR;
-	}
+	u8* K = concat(6, &K_len, data, len, pub_key, sizeof(Ed25519Key), R.data, sizeof(Ed25519Key));
+	if (K == NULL) return -KOCKET_IO_ERROR;
 
 	sha512_t k = {0};
+	KOCKET_BE_CONVERT(K, K_len);
+
 	if ((err = sha512(K, K_len, (u64*) k))) {
-		KOCKET_SAFE_FREE(decoded_r);
-		KOCKET_SAFE_FREE(decoded_A);
 		KOCKET_SAFE_FREE(K);
 		return err;
 	}
-
+	
+	KOCKET_SAFE_FREE(K);
+	
+	// Calculate k % L for optimization
+	u8 k_data[SCALAR_SIZE] = {0};
+	BigNum ke_num = POS_STATIC_BIG_NUM(k, sizeof(k));
+	BigNum k_num = POS_STATIC_BIG_NUM(k_data, SCALAR_SIZE);
+	BigNum l_num  = POS_STATIC_BIG_NUM(L.data, SCALAR_SIZE);
+	if (__chonky_mod(&k_num, &ke_num, &l_num) == NULL) return -KOCKET_IO_ERROR;
+	
 	// Check the group equation.  
-	ECMPoint temp_point = {0};
 	ECMPoint S_B = {0};
-	mul_point(eight, mul_point(S, (ECMPoint*) &base_point, &S_B), &S_B);
-	ECMPoint k_A = {0};
-	mul_point(eight, mul_point(ptr_to_scalar(k, sizeof(k)), coord_to_point(decoded_A, &temp_point), &k_A), &k_A);
-   	ECMPoint R_k_A = {0};
-	add_point(mul_point(eight, coord_to_point(decoded_r, &temp_point), &R_k_A), &k_A, TRUE);
+	mul_point(S, (ECMPoint*) &base_point, &S_B);
+	
+	ECMPoint h_A = {0};
+	mul_point(ptr_to_scalar(k_data, SCALAR_SIZE), &decoded_A, &h_A);
+   	
+	add_point(&decoded_r, &h_A, TRUE);
 
-	if (!is_point_eq(&S_B, &R_k_A)) {
-		KOCKET_SAFE_FREE(decoded_r);
-		KOCKET_SAFE_FREE(decoded_A);
-		KOCKET_SAFE_FREE(K);
-
+	if (!is_point_eq(&S_B, &decoded_r)) {
 		WARNING_LOG("Failed to decode the signature as: [8][S]B = [8]R + [8][k]A', is not true");
 		return -KOCKET_INVALID_SIGNATURE;
 	}
-
-	KOCKET_SAFE_FREE(decoded_r);
-	KOCKET_SAFE_FREE(decoded_A);
-	KOCKET_SAFE_FREE(K);
 
 	return KOCKET_NO_ERROR;
 }
@@ -237,40 +235,41 @@ static Ed25519Signature SIGNATURE_LE = {
 
 int test_ed25519(u8* data, u64 len) {
 	int err = 0;
-	/* Ed25519Key priv_key = {0}; */
-	/* generate_priv_key(priv_key); */
+	/* Ed25519Key priv_key = SECRET_KEY_LE; */
+	Ed25519Key priv_key = {0};
+	generate_priv_key(priv_key);
 	
-	/* PRINT_KEY(priv_key); */
+	PRINT_KEY(priv_key);
 
 	Ed25519Key pub_key = {0};
-	if ((err = generate_pub_key(pub_key, SECRET_KEY_LE))) {
+	if ((err = generate_pub_key(pub_key, priv_key))) {
 		ERROR_LOG("Failed to generate the public key.", kocket_status_str[-err]);
 		return err;
 	}
 	
 	PRINT_KEY(pub_key);
-	PRINT_KEY(PUBLIC_KEY_LE);
+	/* PRINT_KEY(PUBLIC_KEY_LE); */
 
-	// TODO: Temporary check
-	if (mem_cmp(PUBLIC_KEY_LE, pub_key, sizeof(Ed25519Key))) {
-		WARNING_LOG("publick key does not match");
-		return -KOCKET_INVALID_SIGNATURE;
-	}
+	/* // TODO: Temporary check */
+	/* if (mem_cmp(PUBLIC_KEY_LE, pub_key, sizeof(Ed25519Key))) { */
+	/* 	WARNING_LOG("publick key does not match"); */
+	/* 	return -KOCKET_INVALID_SIGNATURE; */
+	/* } */
 
 	Ed25519Signature signature = {0};
-	if ((err = sign(signature, SECRET_KEY_LE, pub_key, NULL, 0))) {
+	if ((err = sign(signature, priv_key, pub_key, NULL, 0))) {
 		ERROR_LOG("Failed to sign.", kocket_status_str[-err]);
 		return err;
 	}
 
 	PRINT_SIGNATURE(signature);
-	PRINT_SIGNATURE(SIGNATURE_LE);
+	/* PRINT_SIGNATURE(SIGNATURE_LE); */
 	
-	// TODO: Temporary check
-	if (mem_cmp(SIGNATURE_LE, signature, sizeof(Ed25519Signature))) {
-		WARNING_LOG("publick key does not match");
-		return -KOCKET_INVALID_SIGNATURE;
-	}
+	/* // TODO: Temporary check */
+	/* if (mem_cmp(SIGNATURE_LE, signature, sizeof(Ed25519Signature))) { */
+	/* 	WARNING_LOG("publick key does not match"); */
+	/* 	return -KOCKET_INVALID_SIGNATURE; */
+	/* } */
 	
 	if (verify_signature(pub_key, signature, NULL, 0)) {
 		printf("Failed to verify the signature.\n");

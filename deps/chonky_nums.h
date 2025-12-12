@@ -499,6 +499,21 @@ static bool chonky_is_gt(const BigNum* a, const BigNum* b) {
 	return FALSE;
 }
 
+static bool chonky_is_gte(const BigNum* a, const BigNum* b) {
+	u64 a_size = chonky_real_size(a);
+	u64 b_size = chonky_real_size(b);
+	
+	if (a_size > b_size) return TRUE;
+	else if (a_size < b_size) return FALSE;
+
+	for (s64 i = (align_64(a_size) / 8) - 1; i >= 0; --i) {
+		if ((a -> data_64)[i] > (b -> data_64)[i]) return TRUE;
+		else if ((b -> data_64)[i] > (a -> data_64)[i]) return FALSE;
+	}
+	
+	return TRUE;
+}
+
 static bool is_chonky_zero(BigNum* num) {
 	for (u64 i = 0; i < num -> size / 8; ++i) {
 		if ((num -> data_64)[i]) return FALSE;
