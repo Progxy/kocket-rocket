@@ -47,59 +47,88 @@
 // ------------------------ 
 //  Functions Declarations
 // ------------------------ 
-static inline int is_rdseed_supported(void);
-static inline int is_rdrand_supported(void);
-NO_INLINE static u64 get_rand64(int is_rdrand_supported);
-NO_INLINE static u32 get_seed32(int is_rdseed_supported);
+static inline void is_rdseed_supported(void);
+static inline void is_rdrand_supported(void);
+NO_INLINE static u64 get_rand64(void);
+NO_INLINE static u32 get_seed32(void);
 void cha_cha20_randomize(u8 key[256], u8 nonce[96], u8 random_data[64]);
 u8* cha_cha20(u8 random_data[64]);
 
 /* -------------------------------------------------------------------------------------------------------- */
-static inline int is_rdseed_supported(void) {
+// ------------------ 
+//  Static Variables 
+// ------------------ 
+static int rdseed_support = FALSE;
+static int rdrand_support = FALSE;
+
+static inline void is_rdseed_supported(void) {
 	int is_supported = 0; 
 	int cpuid_feature = 7;
 	int sub_cpuid_feature = 0;
+	
 	__asm__ volatile (                          
 		"cpuid\n\t"                                
 		: "=b"(is_supported)     
 		: "a"(cpuid_feature), "c"(sub_cpuid_feature)
 	);      
-	return (is_supported >> 18) & 0x01; 
+	
+	rdseed_support = (is_supported >> 18) & 0x01; 
+	
+	return;
 }
 
-static inline int is_rdrand_supported(void) {
+static inline void is_rdrand_supported(void) {
     int is_supported = 0; 
 	int cpuid_feature = 1;
+	
 	__asm__ volatile (                         
         "cpuid\n\t"                              
         : "=c"(is_supported)                   
         : "a"(cpuid_feature)
 	);                     
-    return (is_supported >> 30) & 0x01; 
+    
+	rdrand_support = (is_supported >> 30) & 0x01; 
+	
+	return;
 }
 
-NO_INLINE static u64 get_rand64(int is_rdrand_supported) {
-	if (!is_rdrand_supported) return ((u64) kocket_rand());
-	u64 rand = 0;
-    __asm__ volatile(
-        "kocket_get_rand:\n\t"
-		"rdrand %[rand]\n\t"
-        "jnc kocket_get_rand\n\t"
-        : [rand] "=r"(rand)
-	);
-    return rand;
-}
-
-NO_INLINE static u32 get_seed32(int is_rdseed_supported) {
-    if (!is_rdseed_supported) return ((u32) get_rand64(TRUE));
+NO_INLINE static u32 get_seed32(void) {
+    if (!rdseed_support) {
+		return ((u32) kocket_rand());
+	}
+	
 	u32 seed = 0;
-    __asm__ volatile(
-        "kocket_get_seed:\n\t"
-        "rdseed %[seed]\n\t"
-        "jnc kocket_get_seed\n\t"
-        : [seed] "=r"(seed)
-	);
+	do {
+		__asm__ volatile(
+			"kocket_get_seed:\n\t"
+			"rdseed %[seed]\n\t"
+			"jnc kocket_get_seed\n\t"
+			: [seed] "=r"(seed)
+		);
+	} while (seed == 0);
+
     return seed;
+}
+
+NO_INLINE static u64 get_rand64(void) {
+	if (!rdrand_support) {
+		return ((u64) kocket_rand());
+	}
+	
+	static u64 previous_rand = 0;
+	u64 rand = 0;
+	do {
+		__asm__ volatile(
+			"kocket_get_rand:\n\t"
+			"rdrand %[rand]\n\t"
+			"jnc kocket_get_rand\n\t"
+			: [rand] "=r"(rand)
+		);
+	} while (rand == previous_rand || rand == 0);
+	
+	previous_rand = rand ^ get_seed32() ^ previous_rand;
+
+	return previous_rand;
 }
 
 void cha_cha20_randomize(u8 key[256], u8 nonce[96], u8 random_data[64]) {
@@ -143,19 +172,19 @@ u8* cha_cha20(u8 random_data[64]) {
 	u32 nonce[24] = {0};
 	mem_set(random_data, 0, 64 * sizeof(u8));
 
-	int is_supported_rdseed = is_rdseed_supported();
-    int is_supported_rdrand = is_rdrand_supported();
-	if (!is_supported_rdrand) {
+	is_rdseed_supported();
+    is_rdrand_supported();
+	if (!rdrand_support) {
         WARNING_LOG("CHACHA20: RDRAND is UNSUPPORTED.");
-        if (!is_supported_rdseed) WARNING_LOG("CHACHA20: RDSEED is UNSUPPORTED.");
+        if (!rdseed_support) WARNING_LOG("CHACHA20: RDSEED is UNSUPPORTED.");
         kocket_srand();
-    } else if (!is_supported_rdseed) {
+    } else if (!rdseed_support) {
 		DEBUG_LOG("CHACHA20: RDSEED is UNSUPPORTED.");
 	}
 
 	for (u8 i = 0; i < 64; ++i) {
-		key[i] = get_rand64(is_supported_rdrand);
-		if (i < 24) nonce[i] = get_seed32(is_supported_rdseed);
+		key[i] = get_rand64();
+		if (i < 24) nonce[i] = get_seed32();
 	}
 
 	cha_cha20_randomize((u8*) key, (u8*) nonce, random_data);

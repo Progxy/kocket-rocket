@@ -41,8 +41,8 @@ For every encrypted message, the sender generates a **fresh ephemeral X25519 key
 ---
 
 ## 3. High-Level Protocol Flow
-### 3.1 Sender Procedure
 
+### 3.1 Sender Procedure
 1. **Message signing**  
    `signed_message = signature || plaintext` (Ed25519, RFC 8032)
 
@@ -68,9 +68,9 @@ For every encrypted message, the sender generates a **fresh ephemeral X25519 key
 See [§4](#4.-Wire-Format-Specification).
 
 ### 3.2 Recipient Procedure
-1. Parse wire message and extract: ephemeral_pub, sequence_number, sender_pub, ciphertext, AAD.  
+1. Parse wire message and extract: `ephemeral_pub, sequence_number, sender_pub, ciphertext, AAD`.  
 2. Validate sequence number for replay protection.  
-3. Compute shared secret: shared_secret = X25519(recipient_priv, ephemeral_pub)
+3. Compute shared secret: `shared_secret = X25519(recipient_priv, ephemeral_pub)` 
 4. Derive AEAD key and nonce via HKDF-SHA256.  
 5. Decrypt ciphertext with ChaCha20-Poly1305 using provided AAD.  
 6. Split signature and message (`signature || plaintext`).  
