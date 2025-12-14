@@ -4,6 +4,7 @@
 #include "x25519.h"
 #include "ed25519.h"
 #include "poly1305.h"
+#include "hkdf.h"
 #include "sha512.h"
 
 int test_sha512(void) {
@@ -88,15 +89,33 @@ int main() {
 	
 	printf("\n-----------------------------------------\n\n");
 	
-	printf("Testing X25519:\n");
-	if ((ret = x25519(NULL))) {
+	printf("Testing X25519 (with check test):\n");
+	if ((ret = test_x25519(TRUE))) {
 		printf("ERROR::%s: while testing X25519.\n", kocket_status_str[-ret]);
 		return ret;
 	}
 	
+	printf("\n-----------------------------------------\n\n");
+	
+	printf("Testing X25519 (with random data):\n");
+	if ((ret = test_x25519(FALSE))) {
+		printf("ERROR::%s: while testing X25519.\n", kocket_status_str[-ret]);
+		return ret;
+	}
+	
+	printf("\n-----------------------------------------\n\n");
+	
 	printf("Testing POLY1305:\n");
 	if ((ret = poly1305(NULL))) {
 		printf("ERROR::%s: while testing POLY1305.\n", kocket_status_str[-ret]);
+		return ret;
+	}
+	
+	printf("\n-----------------------------------------\n\n");
+	
+	printf("Testing HKDF:\n");
+	if ((ret = test_hkdf())) {
+		printf("ERROR::%s: while testing HKDF.\n", kocket_status_str[-ret]);
 		return ret;
 	}
 

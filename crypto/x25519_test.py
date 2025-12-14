@@ -96,7 +96,7 @@ def x25519(scalar_bytes: bytes, u_bytes: bytes) -> bytes:
 
 if __name__ == "__main__":
     # Recipient static private key
-    recipient_priv_raw = random_32_bytes()
+    recipient_priv_raw = bytes.fromhex("60EB4BCE379A0217D8888AB278F61A90A2C481B63745F47B25620B8EA2DBD358")
     recipient_priv = clamp_scalar(recipient_priv_raw)
 
     # Recipient public key
@@ -108,7 +108,7 @@ if __name__ == "__main__":
     print()
     
     # Sender ephemeral private key
-    sender_eph_priv_raw = random_32_bytes()
+    sender_eph_priv_raw = bytes.fromhex("7BECEC1BEE8412B5D4F101B83839F7B6FA7E3E03291EB8197C3A709429A87F80")
     sender_eph_priv = clamp_scalar(sender_eph_priv_raw)
 
     # Sender ephemeral public key
