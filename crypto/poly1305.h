@@ -6,7 +6,7 @@
 #define _KOCKET_PRINTING_UTILS_
 #define _KOCKET_NO_PERROR_SUPPORT_
 #include "../kocket_utils.h"
-
+#include "./chacha20.h"
 
 /* Reference [RFC 8439](https://datatracker.ietf.org/doc/html/rfc8439) */
 

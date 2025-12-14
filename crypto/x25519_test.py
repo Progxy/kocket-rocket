@@ -52,7 +52,7 @@ def x25519(scalar_bytes: bytes, u_bytes: bytes) -> bytes:
     # Decode inputs
     k = decode_scalar25519(scalar_bytes)
     u = decode_u_coordinate(u_bytes)
-
+    
     # Initialize
     x1 = u
     x2 = 1

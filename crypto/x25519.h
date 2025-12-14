@@ -15,9 +15,10 @@
 typedef u8 x25519Scalar[32];
 
 static const x25519Scalar x25519_base_point = {
-	0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09
 };
 
 #define PRINT_X25519_SCALAR(scalar) print_scalar(#scalar, scalar)
@@ -33,17 +34,25 @@ static void decode_scalar25519(x25519Scalar k, const x25519Scalar scalar) {
 	k[0]  &= 248;
     k[31] &= 127;
     k[31] |= 64;
-    return;
+    KOCKET_BE_CONVERT(k, sizeof(x25519Scalar));
+	return;
 }
 
-// TODO: Could be that the encode/decode also switch from little endian to big
-// endian, check this if encountering errors
-#define encode_u_coordinate decode_u_coordinate
 static void decode_u_coordinate(const x25519Scalar u, x25519Scalar d_u) {
+	ECMScalar u_s = ptr_to_scalar((u8*) u, sizeof(x25519Scalar));
+	KOCKET_BE_CONVERT(u_s.data, sizeof(x25519Scalar));
+	ECMScalar decoded_u = ecm_mod(u_s, p);
+	ecm_clean_temp();
+	mem_cpy(d_u, decoded_u.data, sizeof(x25519Scalar));
+	return;
+}
+
+static void encode_u_coordinate(const x25519Scalar u, x25519Scalar d_u) {
 	ECMScalar u_s = ptr_to_scalar((u8*) u, sizeof(x25519Scalar));
 	ECMScalar decoded_u = ecm_mod(u_s, p);
 	ecm_clean_temp();
 	mem_cpy(d_u, decoded_u.data, sizeof(x25519Scalar));
+	KOCKET_BE_CONVERT(d_u, sizeof(x25519Scalar));
 	return;
 }
 
@@ -57,7 +66,6 @@ static void xor_scalar(x25519Scalar scalar, const x25519Scalar a, const x25519Sc
 	return;
 }
 
-// TODO: Implement me
 static void neg_scalar(x25519Scalar scalar, const x25519Scalar a) {
 	u64 carry = 0;
 	for (unsigned int i = 0; i < 4; ++i) {
@@ -83,9 +91,11 @@ static void cswap(const x25519Scalar swap, x25519Scalar x2, x25519Scalar x3) {
 
 static void clamp_scalar(x25519Scalar k, const u8* k_data) {
 	mem_cpy(k, k_data, sizeof(x25519Scalar));
-    k[0]  &= 248;
+	KOCKET_BE_CONVERT(k, sizeof(x25519Scalar));
+	k[0]  &= 248;
     k[31] &= 127;
     k[31] |= 64;
+	KOCKET_BE_CONVERT(k, sizeof(x25519Scalar));
 	return;
 }
 
@@ -94,7 +104,8 @@ void x25519(x25519Scalar res, const x25519Scalar scalar_bytes, const x25519Scala
 	// Decode inputs
     x25519Scalar k = {0};
 	decode_scalar25519(k, scalar_bytes);
-    x25519Scalar u = {0};
+
+	x25519Scalar u = {0};
 	decode_u_coordinate(u_bytes, u);
 
     // Initialize
@@ -167,7 +178,7 @@ static void random_32_bytes(u8 random_bytes[32]) {
 	return;
 }
 
-// TODO: Testing vector
+// Testing Vectors
 static const u8 RECIPIENT_PRIV_RAW[32] = {
 	0x58, 0xD3, 0xDB, 0xA2, 0x8E, 0x0B, 0x62, 0x25, 
 	0x7B, 0xF4, 0x45, 0x37, 0xB6, 0x81, 0xC4, 0xA2, 
