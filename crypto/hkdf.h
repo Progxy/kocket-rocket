@@ -6,11 +6,11 @@
 #define _KOCKET_NO_PERROR_SUPPORT_
 #include "../kocket_utils.h"
 #include "sha512.h"
-/* #include "./chacha20.h" */
-/* #include "./ecm_ops.h" */
 
 #define EMPTY_BYTE_STRING { .data = NULL, .len = 0 }
 #define SLICE_BYTE_STRING(byte_string, start, end) { .data = (byte_string).data + (start), .len = (end) - (start) }
+#define FREE_BYTE_STRING(byte_string) KOCKET_SAFE_FREE((byte_string).data)
+
 typedef struct ByteString {
 	u8* data;
 	u64 len;	
@@ -24,9 +24,80 @@ void print_byte_string(const char* name, const ByteString byte_string) {
 	return;
 }
 
-static int hmac_sha512(sha512_64_t result, const ByteString text, const ByteString key) {
-	TODO("Implement me");
-	return -KOCKET_TODO;
+static int copy_byte_string(ByteString* dest, const ByteString src) {
+	dest -> data = calloc(src.len, sizeof(u8));
+	if (dest -> data == NULL) {
+		WARNING_LOG("Failed to allocate byte string.");
+		return -KOCKET_IO_ERROR;
+	}
+	
+	mem_cpy(dest -> data, src.data, src.len);
+	dest -> len = src.len;
+
+	return KOCKET_NO_ERROR;
+}
+
+static int hmac_sha512(sha512_64_t digest, const ByteString text, const ByteString key) {	
+	int err = 0;
+	ByteString key_c = {0};
+	
+	if ((err = copy_byte_string(&key_c, key))) return err;
+
+	// Inner padding
+	unsigned char k_ipad[65] = {0};    
+	
+	// Outer padding
+	unsigned char k_opad[65] = {0};
+        
+	// If key is longer than 64 bytes reset it to key = sha512(key)
+	if (key_c.len > 64) {
+		sha512_64_t tk = {0};
+		sha512(key_c.data, key_c.len, tk);
+		mem_cpy(key_c.data, tk, sizeof(sha512_64_t));
+		key_c.len = 16;
+	}
+
+	/* start out by storing key in pads */
+	mem_cpy(key_c.data, k_ipad, key_c.len);
+	mem_cpy(key_c.data, k_opad, key_c.len);
+
+	FREE_BYTE_STRING(key_c);
+
+	/* XOR key with ipad and opad values */
+	for (unsigned int i = 0; i < 64; ++i) {
+		k_ipad[i] ^= 0x36;
+		k_opad[i] ^= 0x5C;
+	}
+	
+	sha512_ctx context = {0};
+    
+	// Perform inner MD5
+	// Init context for 1st pass
+	sha512_init(&context); 
+	
+	// Start with inner pad 
+	sha512_update(&context, k_ipad, 64);
+	
+	// Then text of datagram 
+	sha512_update(&context, text.data, text.len); 
+	
+	// Finish up 1st pass 
+	sha512_final(digest, &context);          
+	
+	// Perform outer MD5
+	// Init context for 2nd pass 
+	sha512_init(&context);                   
+	
+	// Start with outer pad 
+	sha512_update(&context, k_opad, 64);     
+	
+	// Then results of 1st hash 
+	sha512_update(&context, (u8*) digest, 16);     
+	
+	// Finish up 2nd pass 
+	sha512_final(digest, &context);          
+
+	return KOCKET_NO_ERROR;
 }
 
 static int hkdf_sha512_extract(sha512_64_t prk, const ByteString salt, const ByteString ikm) {
@@ -78,18 +149,18 @@ static int hkdf_sha512_expand(u8* result, const sha512_64_t prk, const ByteStrin
 		ByteString concatenation = {0};
 		concatenation.data = concat(3, &(concatenation.len), t, t_size, info, info.len, (u8*) counter, bytes_len((u8*) counter, 8));
         if (concatenation.data == NULL) {
-			KOCKET_SAFE_FREE(okm.data);
+			FREE_BYTE_STRING(okm);
 			WARNING_LOG("Failed to allocate concatenation buffer.");
 			return -KOCKET_IO_ERROR;
 		}
 		
 		if ((err = hmac_sha512(t, prk_str, concatenation))) {
-			KOCKET_SAFE_FREE(okm.data);
-			KOCKET_SAFE_FREE(concatenation.data);
+			FREE_BYTE_STRING(okm);
+			FREE_BYTE_STRING(concatenation);
 			return err;
 		}
 		
-		KOCKET_SAFE_FREE(concatenation.data);
+		FREE_BYTE_STRING(concatenation);
 
 		extend_string(&(okm.data), &(okm.len), (u8*) t, t_size);
         if (okm.data == NULL) {
@@ -102,7 +173,7 @@ static int hkdf_sha512_expand(u8* result, const sha512_64_t prk, const ByteStrin
 	}
 	
 	mem_cpy(result, okm.data, length);
-	KOCKET_SAFE_FREE(okm.data);
+	FREE_BYTE_STRING(okm);
 
 	return KOCKET_NO_ERROR;
 }
@@ -162,17 +233,15 @@ int test_hkdf(void) {
 		return err;
 	}
 	
-	KOCKET_SAFE_FREE(info.data);
+	FREE_BYTE_STRING(info);
 
     ByteString aead_key = SLICE_BYTE_STRING(key_material, 0, 32);
     ByteString aead_nonce = SLICE_BYTE_STRING(key_material, 32, 44);
 
     PRINT_BYTE_STRING(aead_key);
 	PRINT_BYTE_STRING(aead_nonce);
+	
 	return KOCKET_NO_ERROR;
-
-	TODO("Implement me.");
-	return -KOCKET_TODO;
 }
 
 #endif //_HKDF_H_

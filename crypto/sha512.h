@@ -33,6 +33,12 @@
 
 typedef u8 sha512_t[64];
 typedef u64 sha512_64_t[8];
+typedef struct sha512_ctx {
+	sha512_64_t hash;
+	u8 msg_block[BLOCK_SIZE_IN_BYTES * 2];
+	u64 msg_block_size;
+	bool is_finished;
+} sha512_ctx;
 
 static const u64 costants[] = {
 	0x428A2F98D728AE22, 0x7137449123EF65CD, 0xB5C0FBCFEC4D3B2F, 0xE9B5DBA58189DBBC,
@@ -58,8 +64,7 @@ static const u64 costants[] = {
 };
 
 #define PRINT_HASH(hash) print_hash(#hash, hash)
-
-static void print_hash(const char* name, u8* hash) {
+static void print_hash(const char* name, const u8* hash) {
 	printf("%s:\n", name);
 	
 	printf("\tLittle Endian: ");
@@ -73,7 +78,7 @@ static void print_hash(const char* name, u8* hash) {
 	return;
 }
 
-UNUSED_FUNCTION static void print_hexstr(u32* hex_str, u64 size) {
+UNUSED_FUNCTION static void print_hexstr(const u32* hex_str, const u64 size) {
 	printf("hex_str: \n");
 	
 	for (u64 i = 0; i < size / 4; ++i) {
@@ -86,7 +91,7 @@ UNUSED_FUNCTION static void print_hexstr(u32* hex_str, u64 size) {
 	return;
 }
 
-static u8* padding(u8* data, u64 len, int* blocks_cnt) {
+static u8* padding(const u8* data, const u64 len, int* blocks_cnt) {
 	if (data == NULL) {
 		*blocks_cnt = -KOCKET_INVALID_PARAMETERS;
 		return NULL;
@@ -114,10 +119,132 @@ static u8* padding(u8* data, u64 len, int* blocks_cnt) {
 	return padded_data;
 }
 
-#define sha512_le(data, len, res) __sha512(data, len, res, TRUE)
-#define sha512(data, len, res)    __sha512(data, len, res, FALSE)
+void sha512_init(sha512_ctx* ctx) {
+	(ctx -> hash)[0] = 0x6A09E667F3BCC908;
+    (ctx -> hash)[1] = 0xBB67AE8584CAA73B;
+    (ctx -> hash)[2] = 0x3C6EF372FE94F82B;
+    (ctx -> hash)[3] = 0xA54FF53A5F1D36F1;
+    (ctx -> hash)[4] = 0x510E527FADE682D1;
+    (ctx -> hash)[5] = 0x9B05688C2B3E6C1F;
+    (ctx -> hash)[6] = 0x1F83D9ABFB41BD6B;
+    (ctx -> hash)[7] = 0x5BE0CD19137E2179;
+	
+	mem_set(ctx -> msg_block, 0, BLOCK_SIZE_IN_BYTES * 2);
+	ctx -> msg_block_size = 0;
+	ctx -> is_finished = FALSE;
+	
+	return;
+}
 
-int __sha512(u8* data, u64 len, sha512_64_t res, bool use_le) {
+static void process_block(sha512_ctx* ctx) {
+	u64 W[80] = {0};
+
+	mem_cpy(W, ctx -> msg_block, BLOCK_SIZE_IN_BYTES);
+	for (unsigned int t = 0; t < 16; ++t) KOCKET_BE_CONVERT(W + t, 8);
+	for (unsigned int t = 16; t < 80; ++t) {
+		W[t] = SSIG1(W[t - 2]) + W[t - 7] + SSIG0(W[t - 15]) + W[t - 16];
+	}
+
+	u64 a = (ctx -> hash)[0];
+	u64 b = (ctx -> hash)[1];
+	u64 c = (ctx -> hash)[2];
+	u64 d = (ctx -> hash)[3];
+	u64 e = (ctx -> hash)[4];
+	u64 f = (ctx -> hash)[5];
+	u64 g = (ctx -> hash)[6];
+	u64 h = (ctx -> hash)[7];
+
+	for (unsigned int t = 0; t < 80; ++t) {   
+		const u64 T1 = h + BSIG1(e) + CH(e, f, g) + costants[t] + W[t];
+		const u64 T2 = BSIG0(a) + MAJ(a, b, c);
+		h = g;
+		g = f;
+		f = e;
+		e = d + T1;
+		d = c;
+		c = b;
+		b = a;
+		a = T1 + T2;
+	}
+
+	(ctx -> hash)[0] += a;
+	(ctx -> hash)[1] += b;
+	(ctx -> hash)[2] += c;
+	(ctx -> hash)[3] += d;
+	(ctx -> hash)[4] += e;
+	(ctx -> hash)[5] += f;
+	(ctx -> hash)[6] += g;
+	(ctx -> hash)[7] += h;
+
+	mem_cpy(ctx -> msg_block, ctx -> msg_block + BLOCK_SIZE_IN_BYTES, BLOCK_SIZE_IN_BYTES);
+	mem_set(ctx -> msg_block + BLOCK_SIZE_IN_BYTES, 0, BLOCK_SIZE_IN_BYTES);
+	ctx -> msg_block_size -= BLOCK_SIZE_IN_BYTES;
+
+	return;
+}
+
+static void pad_block(sha512_ctx* ctx) {
+	u64 len = ctx -> msg_block_size;
+	u64 k = (896 - ((ctx -> msg_block_size * 8 + 1) % BLOCK_SIZE)) % BLOCK_SIZE;
+	unsigned int blocks_cnt = (len * 8 + 1 + k + 128) / BLOCK_SIZE;
+	ctx -> msg_block_size = blocks_cnt * BLOCK_SIZE_IN_BYTES;
+	
+	(ctx -> msg_block)[len] = 0x80;
+	
+	((u64*) (ctx -> msg_block))[ctx -> msg_block_size / 8 - 1] = len * 8;	
+	KOCKET_BE_CONVERT(((u64*) (ctx -> msg_block)) + (ctx -> msg_block_size / 8 - 1), 8);
+
+	return;
+}
+
+int sha512_update(sha512_ctx* ctx, const u8* data, const u64 len) {
+	if (ctx -> is_finished) return -KOCKET_UPDATING_FINISHED_CTX;
+
+	u64 copied_size = MIN(len, BLOCK_SIZE_IN_BYTES - ctx -> msg_block_size);
+	mem_cpy(ctx -> msg_block + ctx -> msg_block_size, data, copied_size);
+	ctx -> msg_block_size += copied_size;
+	
+	u64 offset = copied_size;
+	while (ctx -> msg_block_size >= BLOCK_SIZE_IN_BYTES) {
+		process_block(ctx);	
+		copied_size = MIN(len, BLOCK_SIZE_IN_BYTES - ctx -> msg_block_size);
+		mem_cpy(ctx -> msg_block + ctx -> msg_block_size, data + offset, copied_size);
+		ctx -> msg_block_size += copied_size;
+		offset += copied_size;
+	}
+
+	return KOCKET_NO_ERROR;
+}
+
+#define sha512_final_le(digest, ctx) __sha512_final(digest, ctx, TRUE)
+#define sha512_final(digest, ctx)    __sha512_final(digest, ctx, FALSE)
+void __sha512_final(sha512_64_t digest, sha512_ctx* ctx, bool use_le) {
+	pad_block(ctx);
+	
+	do {
+		process_block(ctx);
+	} while (ctx -> msg_block_size);
+	
+	digest[0] = (ctx -> hash)[7];
+	digest[1] = (ctx -> hash)[6];
+	digest[2] = (ctx -> hash)[5];
+	digest[3] = (ctx -> hash)[4];
+	digest[4] = (ctx -> hash)[3];
+	digest[5] = (ctx -> hash)[2];
+	digest[6] = (ctx -> hash)[1];
+	digest[7] = (ctx -> hash)[0];
+	
+	if (!use_le) KOCKET_BE_CONVERT(digest, 64);
+	
+	ctx -> is_finished = TRUE;
+
+	return;
+}
+
+// TODO: Once we ensure the upper method works we could rewrite the latter to use the upper one
+#define sha512_le(data, len, digest) __sha512(data, len, digest, TRUE)
+#define sha512(data, len, digest)    __sha512(data, len, digest, FALSE)
+int __sha512(u8* data, u64 len, sha512_64_t digest, bool use_le) {
 	int blocks_cnt = 0;
 	
 	u8* padded_data = padding(data, len, &blocks_cnt);
@@ -179,16 +306,16 @@ int __sha512(u8* data, u64 len, sha512_64_t res, bool use_le) {
 	
 	KOCKET_SAFE_FREE(padded_data);
 
-	res[0] = hash[7];
-	res[1] = hash[6];
-	res[2] = hash[5];
-	res[3] = hash[4];
-	res[4] = hash[3];
-	res[5] = hash[2];
-	res[6] = hash[1];
-	res[7] = hash[0];
+	digest[0] = hash[7];
+	digest[1] = hash[6];
+	digest[2] = hash[5];
+	digest[3] = hash[4];
+	digest[4] = hash[3];
+	digest[5] = hash[2];
+	digest[6] = hash[1];
+	digest[7] = hash[0];
 	
-	if (!use_le) KOCKET_BE_CONVERT(res, 64);
+	if (!use_le) KOCKET_BE_CONVERT(digest, 64);
 
 	return KOCKET_NO_ERROR;
 }
