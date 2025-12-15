@@ -7,7 +7,14 @@ def hkdf_extract(salt: bytes, ikm: bytes, hash_fn=hashlib.sha256) -> bytes:
     """
     if salt is None:
         salt = b"\x00" * hash_fn().digest_size
-    return hmac.new(salt, ikm, hash_fn).digest()
+    
+    print(f"salt: {salt.hex().upper()}\nikm: {ikm.hex().upper()}")
+
+    res = hmac.new(salt, ikm, hash_fn).digest()
+    
+    print(f"res: {res.hex().upper()}")
+
+    return res
 
 def hkdf_expand(prk: bytes, info: bytes, length: int, hash_fn=hashlib.sha256) -> bytes:
     """
@@ -30,6 +37,7 @@ def hkdf_expand(prk: bytes, info: bytes, length: int, hash_fn=hashlib.sha256) ->
 
 def hkdf(ikm: bytes, length: int, salt: bytes = None, info: bytes = b"", hash_fn=hashlib.sha256) -> bytes:
     prk = hkdf_extract(salt, ikm, hash_fn)
+    print(f"prk: {prk.hex().upper()}")
     return hkdf_expand(prk, info, length, hash_fn)
 
 if __name__ == "__main__":

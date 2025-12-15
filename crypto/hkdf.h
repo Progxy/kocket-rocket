@@ -16,10 +16,13 @@ typedef struct ByteString {
 	u64 len;	
 } ByteString;
 
+#define DIGEST_SIZE 64
+#define SHA_BLOCK_SIZE 128
+
 #define PRINT_BYTE_STRING(byte_string) print_byte_string(#byte_string, byte_string)
 void print_byte_string(const char* name, const ByteString byte_string) {
-	printf("%s: ", name);
-	for (s64 i = byte_string.len; i >= 0; --i) printf("%02X", (byte_string.data)[i]);
+	printf("%s (len: %llu): ", name, byte_string.len);
+	for (s64 i = byte_string.len - 1; i >= 0; --i) printf("%02X", (byte_string.data)[i]);
 	printf("\n");
 	return;
 }
@@ -44,27 +47,33 @@ static int hmac_sha512(sha512_64_t digest, const ByteString text, const ByteStri
 	if ((err = copy_byte_string(&key_c, key))) return err;
 
 	// Inner padding
-	unsigned char k_ipad[65] = {0};    
+	unsigned char k_ipad[SHA_BLOCK_SIZE] = {0};    
 	
 	// Outer padding
-	unsigned char k_opad[65] = {0};
-        
+	unsigned char k_opad[SHA_BLOCK_SIZE] = {0};
+	
 	// If key is longer than 64 bytes reset it to key = sha512(key)
-	if (key_c.len > 64) {
+	if (key_c.len > SHA_BLOCK_SIZE) {
 		sha512_64_t tk = {0};
-		sha512(key_c.data, key_c.len, tk);
+		if ((err = sha512(key_c.data, key_c.len, tk))) {
+			FREE_BYTE_STRING(key_c);
+			return err;
+		}
+
 		mem_cpy(key_c.data, tk, sizeof(sha512_64_t));
-		key_c.len = 16;
+		key_c.len = DIGEST_SIZE;
 	}
 
+	PRINT_BYTE_STRING(key_c);
+
 	/* start out by storing key in pads */
-	mem_cpy(key_c.data, k_ipad, key_c.len);
-	mem_cpy(key_c.data, k_opad, key_c.len);
+	mem_cpy(k_ipad, key_c.data, key_c.len);
+	mem_cpy(k_opad, key_c.data, key_c.len);
 
 	FREE_BYTE_STRING(key_c);
 
 	/* XOR key with ipad and opad values */
-	for (unsigned int i = 0; i < 64; ++i) {
+	for (unsigned int i = 0; i < SHA_BLOCK_SIZE; ++i) {
 		k_ipad[i] ^= 0x36;
 		k_opad[i] ^= 0x5C;
 	}
@@ -76,7 +85,7 @@ static int hmac_sha512(sha512_64_t digest, const ByteString text, const ByteStri
 	sha512_init(&context); 
 	
 	// Start with inner pad 
-	sha512_update(&context, k_ipad, 64);
+	sha512_update(&context, k_ipad, SHA_BLOCK_SIZE);
 	
 	// Then text of datagram 
 	sha512_update(&context, text.data, text.len); 
@@ -89,10 +98,10 @@ static int hmac_sha512(sha512_64_t digest, const ByteString text, const ByteStri
 	sha512_init(&context);                   
 	
 	// Start with outer pad 
-	sha512_update(&context, k_opad, 64);     
-	
+	sha512_update(&context, k_opad, SHA_BLOCK_SIZE);     
+
 	// Then results of 1st hash 
-	sha512_update(&context, (u8*) digest, 16);     
+	sha512_update(&context, (u8*) digest, DIGEST_SIZE);     
 	
 	// Finish up 2nd pass 
 	sha512_final(digest, &context);          
@@ -101,12 +110,17 @@ static int hmac_sha512(sha512_64_t digest, const ByteString text, const ByteStri
 }
 
 static int hkdf_sha512_extract(sha512_64_t prk, const ByteString salt, const ByteString ikm) {
-    u8 t_salt_data[64] = {0};
-	ByteString t_salt = { .data = t_salt_data, .len = 64 };
+    u8 t_salt_data[DIGEST_SIZE] = {0};
+	ByteString t_salt = { .data = t_salt_data, .len = DIGEST_SIZE };
 	if (salt.data != NULL) mem_cpy(t_salt.data, salt.data, salt.len);
+
+	PRINT_BYTE_STRING(t_salt);
+	PRINT_BYTE_STRING(ikm);
 
 	int err = 0;
 	if ((err = hmac_sha512(prk, t_salt, ikm))) return err;
+
+	PRINT_HASH((u8*) prk);
 
 	return KOCKET_NO_ERROR;
 }
@@ -131,7 +145,7 @@ static void extend_string(u8** str, u64* size, const u8* str_to_add, const u64 s
 }
 
 static int hkdf_sha512_expand(u8* result, const sha512_64_t prk, const ByteString info, const u64 length) {
-    if (length > (255 * 64)) {
+    if (length > (255 * DIGEST_SIZE)) {
         WARNING_LOG("Requested key length too long");
 		return -KOCKET_INVALID_LENGTH;
 	}
@@ -143,11 +157,11 @@ static int hkdf_sha512_expand(u8* result, const sha512_64_t prk, const ByteStrin
     u64 counter = 1;
 	int err = 0;
 
-	const ByteString prk_str = { .data = (u8*) prk, .len = 64 };
+	const ByteString prk_str = { .data = (u8*) prk, .len = DIGEST_SIZE };
 
     while (okm.len < length) {
 		ByteString concatenation = {0};
-		concatenation.data = concat(3, &(concatenation.len), t, t_size, info, info.len, (u8*) counter, bytes_len((u8*) counter, 8));
+		concatenation.data = concat(3, &(concatenation.len), t, t_size, info, info.len, (u8*) counter, bytes_len((u8*) &counter, 8));
         if (concatenation.data == NULL) {
 			FREE_BYTE_STRING(okm);
 			WARNING_LOG("Failed to allocate concatenation buffer.");
@@ -169,7 +183,7 @@ static int hkdf_sha512_expand(u8* result, const sha512_64_t prk, const ByteStrin
 		}
 
 		counter += 1;
-		t_size = 64;
+		t_size = DIGEST_SIZE;
 	}
 	
 	mem_cpy(result, okm.data, length);
@@ -208,7 +222,7 @@ int test_hkdf(void) {
 	};
 
 	const char* info_str = "X25519-CHACHA20POLY1305-v1";
-	u64 sequence_number = 0;
+	u64 sequence_number = 1;
 	
 	u64 info_size = 0;
 	u8* info_data = concat(4, &info_size, info_str, sizeof(info_str), SENDER_PUB, 32, RECIPIENT_PUB, 32, (u8*) sequence_number, 8);
