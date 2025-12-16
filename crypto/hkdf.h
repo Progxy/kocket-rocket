@@ -19,10 +19,15 @@ typedef struct ByteString {
 #define DIGEST_SIZE 64
 #define SHA_BLOCK_SIZE 128
 
-#define PRINT_BYTE_STRING(byte_string) print_byte_string(#byte_string, byte_string)
-void print_byte_string(const char* name, const ByteString byte_string) {
+#define PRINT_BYTE_STRING(byte_string) print_byte_string(#byte_string, byte_string, FALSE)
+#define PRINT_BYTE_STRING_BE(byte_string) print_byte_string(#byte_string, byte_string, TRUE)
+void print_byte_string(const char* name, const ByteString byte_string, const bool use_be) {
 	printf("%s (len: %llu): ", name, byte_string.len);
-	for (s64 i = byte_string.len - 1; i >= 0; --i) printf("%02X", (byte_string.data)[i]);
+	if (use_be) {
+		for (u64 i = 0; i < byte_string.len; ++i) printf("%02X", (byte_string.data)[i]);
+	} else {
+		for (s64 i = byte_string.len - 1; i >= 0; --i) printf("%02X", (byte_string.data)[i]);
+	}
 	printf("\n");
 	return;
 }
@@ -40,70 +45,64 @@ static int copy_byte_string(ByteString* dest, const ByteString src) {
 	return KOCKET_NO_ERROR;
 }
 
-static int hmac_sha512(sha512_64_t digest, const ByteString text, const ByteString key) {	
+// Note: key and text will be considered Big-Endian
+static int hmac_sha512(sha512_64_t digest, const ByteString key, const ByteString text) {	
 	int err = 0;
 	ByteString key_c = {0};
 	
 	if ((err = copy_byte_string(&key_c, key))) return err;
 
 	// Inner padding
-	unsigned char k_ipad[SHA_BLOCK_SIZE] = {0};    
-	
-	// Outer padding
-	unsigned char k_opad[SHA_BLOCK_SIZE] = {0};
+	u8 k_ipad_data[SHA_BLOCK_SIZE] = {0};    
+	ByteString k_ipad = { .data = k_ipad_data, .len = SHA_BLOCK_SIZE };
+
+	u8 k_opad_data[SHA_BLOCK_SIZE] = {0};    
+	ByteString k_opad = { .data = k_opad_data, .len = SHA_BLOCK_SIZE };
 	
 	// If key is longer than 64 bytes reset it to key = sha512(key)
 	if (key_c.len > SHA_BLOCK_SIZE) {
 		sha512_64_t tk = {0};
-		if ((err = sha512(key_c.data, key_c.len, tk))) {
-			FREE_BYTE_STRING(key_c);
-			return err;
-		}
-
+		sha512(key_c.data, key_c.len, tk);
 		mem_cpy(key_c.data, tk, sizeof(sha512_64_t));
 		key_c.len = DIGEST_SIZE;
 	}
 
-	PRINT_BYTE_STRING(key_c);
-
-	/* start out by storing key in pads */
-	mem_cpy(k_ipad, key_c.data, key_c.len);
-	mem_cpy(k_opad, key_c.data, key_c.len);
+	mem_cpy(k_ipad.data, key_c.data, key_c.len);
+	mem_cpy(k_opad.data, key_c.data, key_c.len);
 
 	FREE_BYTE_STRING(key_c);
 
-	/* XOR key with ipad and opad values */
 	for (unsigned int i = 0; i < SHA_BLOCK_SIZE; ++i) {
-		k_ipad[i] ^= 0x36;
-		k_opad[i] ^= 0x5C;
+		k_ipad.data[i] ^= 0x36;
+		k_opad.data[i] ^= 0x5C;
 	}
 	
-	sha512_ctx context = {0};
-    
-	// Perform inner MD5
-	// Init context for 1st pass
-	sha512_init(&context); 
-	
-	// Start with inner pad 
-	sha512_update(&context, k_ipad, SHA_BLOCK_SIZE);
-	
-	// Then text of datagram 
-	sha512_update(&context, text.data, text.len); 
-	
-	// Finish up 1st pass 
-	sha512_final(digest, &context);          
-	
-	// Perform outer MD5
-	// Init context for 2nd pass 
-	sha512_init(&context);                   
-	
-	// Start with outer pad 
-	sha512_update(&context, k_opad, SHA_BLOCK_SIZE);     
+	u8 test_data[256] = {0};
+	ByteString test = { .data = test_data, .len = 0 };
+	mem_cpy(test.data, k_ipad.data, k_ipad.len);
+	mem_cpy(test.data + k_ipad.len, text.data, text.len);
+	test.len += text.len + k_ipad.len;
 
-	// Then results of 1st hash 
-	sha512_update(&context, (u8*) digest, DIGEST_SIZE);     
+	PRINT_BYTE_STRING_BE(test);
+
+	sha512_64_t m_d = {0};
+	sha512(test.data, test.len, m_d);
+	PRINT_HASH((u8*) m_d);
+
+	abort();
+
+	sha512_64_t fp_digest = {0};
+	sha512_ctx context = {0};
+	sha512_init(&context);
+	sha512_update(&context, k_ipad.data, k_ipad.len);
+	sha512_update(&context, text.data, text.len); 
+	sha512_final(fp_digest, &context);          
 	
-	// Finish up 2nd pass 
+	PRINT_HASH((u8*) fp_digest);
+
+	sha512_init(&context);                   
+	sha512_update(&context, k_opad.data, k_opad.len);     
+	sha512_update(&context, (u8*) fp_digest, DIGEST_SIZE);     
 	sha512_final(digest, &context);          
 
 	return KOCKET_NO_ERROR;
@@ -112,15 +111,19 @@ static int hmac_sha512(sha512_64_t digest, const ByteString text, const ByteStri
 static int hkdf_sha512_extract(sha512_64_t prk, const ByteString salt, const ByteString ikm) {
     u8 t_salt_data[DIGEST_SIZE] = {0};
 	ByteString t_salt = { .data = t_salt_data, .len = DIGEST_SIZE };
-	if (salt.data != NULL) mem_cpy(t_salt.data, salt.data, salt.len);
+	if (salt.data != NULL) {
+		mem_cpy(t_salt.data, salt.data, salt.len);
+		KOCKET_BE_CONVERT(t_salt.data, t_salt.len);
+	}
 
-	PRINT_BYTE_STRING(t_salt);
-	PRINT_BYTE_STRING(ikm);
-
+	KOCKET_BE_CONVERT(ikm.data, ikm.len);
+	
 	int err = 0;
 	if ((err = hmac_sha512(prk, t_salt, ikm))) return err;
 
 	PRINT_HASH((u8*) prk);
+	
+	KOCKET_BE_CONVERT(ikm.data, ikm.len);
 
 	return KOCKET_NO_ERROR;
 }

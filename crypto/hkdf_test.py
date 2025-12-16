@@ -5,8 +5,7 @@ def hkdf_extract(salt: bytes, ikm: bytes, hash_fn=hashlib.sha256) -> bytes:
     """
     HKDF-Extract(salt, IKM) -> PRK
     """
-    if salt is None:
-        salt = b"\x00" * hash_fn().digest_size
+    if salt is None: salt = b"\x00" * hash_fn().digest_size
     
     print(f"salt: {salt.hex().upper()}\nikm: {ikm.hex().upper()}")
 

@@ -41,11 +41,10 @@ void generate_priv_key(Ed25519Key priv_key) {
 }
 
 int generate_pub_key(Ed25519Key pub_key, Ed25519Key priv_key) {
-	int err = 0;
 	sha512_t h = {0};
 
 	KOCKET_BE_CONVERT(priv_key, sizeof(Ed25519Key));
-	if ((err = sha512(priv_key, sizeof(Ed25519Key), (u64*) h))) return err;
+	sha512(priv_key, sizeof(Ed25519Key), (u64*) h);
 	KOCKET_BE_CONVERT(priv_key, sizeof(Ed25519Key));
 
 	mem_cpy(pub_key, h, sizeof(Ed25519Key));
@@ -70,10 +69,9 @@ int generate_pub_key(Ed25519Key pub_key, Ed25519Key priv_key) {
 int sign(Ed25519Signature signature, Ed25519Key priv_key, Ed25519Key pub_key, u8* data, u64 len) {
 	if ((data == NULL && len != 0) || signature == NULL) return -KOCKET_INVALID_PARAMETERS;
 	
-	int err = 0;
 	sha512_t h = {0};
 	KOCKET_BE_CONVERT(priv_key, sizeof(Ed25519Key));
-	if ((err = sha512(priv_key, sizeof(Ed25519Key), (u64*) h))) return err;
+	sha512(priv_key, sizeof(Ed25519Key), (u64*) h);
 	KOCKET_BE_CONVERT(priv_key, sizeof(Ed25519Key));
 	
 	Ed25519Key a = {0};
@@ -89,10 +87,7 @@ int sign(Ed25519Signature signature, Ed25519Key priv_key, Ed25519Key pub_key, u8
 	if (r == NULL) return -KOCKET_IO_ERROR;
 	
 	sha512_t hashed_data = {0};
-	if ((err = sha512(r, r_len, (u64*) hashed_data))) {
-		KOCKET_SAFE_FREE(r);
-		return err;
-	}
+	sha512(r, r_len, (u64*) hashed_data);
 	
 	KOCKET_SAFE_FREE(r);
 
@@ -114,10 +109,7 @@ int sign(Ed25519Signature signature, Ed25519Key priv_key, Ed25519Key pub_key, u8
 	KOCKET_BE_CONVERT(K + sizeof(Ed25519Key), sizeof(Ed25519Key));
 	
 	sha512_t k = {0};
-	if ((err = sha512(K, K_len, (u64*) k))) {
-		KOCKET_SAFE_FREE(K);
-		return err;
-	}
+	sha512(K, K_len, (u64*) k);
 	
 	KOCKET_SAFE_FREE(K);
 
@@ -170,7 +162,6 @@ int verify_signature(Ed25519Key pub_key, Ed25519Signature signature, u8* data, u
 
 	KOCKET_BE_CONVERT(S.data, sizeof(Ed25519Key));
 
-	int err = 0;
 	u64 K_len = 0;
 	u8* K = concat(6, &K_len, R.data, sizeof(Ed25519Key), pub_key, sizeof(Ed25519Key), data, len);
 	if (K == NULL) return -KOCKET_IO_ERROR;
@@ -179,10 +170,7 @@ int verify_signature(Ed25519Key pub_key, Ed25519Signature signature, u8* data, u
 	KOCKET_BE_CONVERT(K + sizeof(Ed25519Key), sizeof(Ed25519Key));
 	
 	sha512_t k = {0};
-	if ((err = sha512(K, K_len, (u64*) k))) {
-		KOCKET_SAFE_FREE(K);
-		return err;
-	}
+	sha512(K, K_len, (u64*) k);
 	
 	KOCKET_SAFE_FREE(K);
 	

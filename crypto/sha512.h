@@ -38,6 +38,7 @@ typedef struct sha512_ctx {
 	u8 msg_block[BLOCK_SIZE_IN_BYTES * 2];
 	u64 msg_block_size;
 	bool is_finished;
+	u64 total_msg_size;
 } sha512_ctx;
 
 static const u64 costants[] = {
@@ -94,39 +95,12 @@ UNUSED_FUNCTION static void print_sha_ctx(const char* name, const sha512_ctx ctx
 	for (int i = BLOCK_SIZE_IN_BYTES * 2 - 1; i >= BLOCK_SIZE_IN_BYTES; --i) printf("%02X", ctx.msg_block[i]);
 	printf("\n");
 	
+	printf("\ttotal_msg_size: %llu\n", ctx.total_msg_size);
 	printf("\tis_finished: %s\n", ctx.is_finished ? "TRUE" : "FALSE");
 	
 	printf("----------------\n");
 
 	return;
-}
-
-static u8* padding(const u8* data, const u64 len, int* blocks_cnt) {
-	if (data == NULL) {
-		*blocks_cnt = -KOCKET_INVALID_PARAMETERS;
-		return NULL;
-	}
-	
-	u64 k = (896 - ((len * 8 + 1) % 1024)) % 1024;
-		
-	*blocks_cnt = (len * 8 + 1 + k + 128) / BLOCK_SIZE;
-	u64 new_size = *blocks_cnt * BLOCK_SIZE_IN_BYTES;
-	
-	u8* padded_data = kocket_calloc(new_size, 1);
-	if (padded_data == NULL) {
-		*blocks_cnt = -KOCKET_IO_ERROR;
-		return NULL;
-	}
-
-	mem_cpy(padded_data, data, len);
-	padded_data[len] = 0x80;
-	
-	((u64*) padded_data)[new_size / 8 - 1] = len * 8;	
-	KOCKET_BE_CONVERT(((u64*) padded_data) + (new_size / 8 - 1), 8);
-	
-	DEBUG_LOG("blocks_cnt: %d, k: %llu, new_size: %llu", *blocks_cnt, k, new_size);
-
-	return padded_data;
 }
 
 void sha512_init(sha512_ctx* ctx) {
@@ -143,6 +117,7 @@ void sha512_init(sha512_ctx* ctx) {
 	
 	mem_set(ctx -> msg_block, 0, BLOCK_SIZE_IN_BYTES * 2);
 	ctx -> msg_block_size = 0;
+	ctx -> total_msg_size = 0;
 	ctx -> is_finished = FALSE;
 	
 	return;
@@ -196,14 +171,14 @@ static void process_block(sha512_ctx* ctx) {
 }
 
 static void pad_block(sha512_ctx* ctx) {
-	u64 len = ctx -> msg_block_size;
+	u64 last_block_len = ctx -> msg_block_size;
 	u64 k = (896 - ((ctx -> msg_block_size * 8 + 1) % BLOCK_SIZE)) % BLOCK_SIZE;
-	unsigned int blocks_cnt = (len * 8 + 1 + k + 128) / BLOCK_SIZE;
+	unsigned int blocks_cnt = (last_block_len * 8 + 1 + k + 128) / BLOCK_SIZE;
 	ctx -> msg_block_size = blocks_cnt * BLOCK_SIZE_IN_BYTES;
 	
-	(ctx -> msg_block)[len] = 0x80;
+	(ctx -> msg_block)[last_block_len] = 0x80;
 	
-	((u64*) (ctx -> msg_block))[ctx -> msg_block_size / 8 - 1] = len * 8;	
+	((u64*) (ctx -> msg_block))[ctx -> msg_block_size / 8 - 1] = ctx -> total_msg_size * 8;	
 	KOCKET_BE_CONVERT(((u64*) (ctx -> msg_block)) + (ctx -> msg_block_size / 8 - 1), 8);
 
 	return;
@@ -228,12 +203,14 @@ int sha512_update(sha512_ctx* ctx, const u8* data, const u64 len) {
 		}
 	}
 
+	ctx -> total_msg_size += len;
+
 	return KOCKET_NO_ERROR;
 }
 
 #define sha512_final_le(digest, ctx) __sha512_final(digest, ctx, TRUE)
 #define sha512_final(digest, ctx)    __sha512_final(digest, ctx, FALSE)
-void __sha512_final(sha512_64_t digest, sha512_ctx* ctx, bool use_le) {
+void __sha512_final(sha512_64_t digest, sha512_ctx* ctx, const bool use_le) {
 	pad_block(ctx);
 	
 	do {
@@ -256,143 +233,19 @@ void __sha512_final(sha512_64_t digest, sha512_ctx* ctx, bool use_le) {
 	return;
 }
 
-// TODO: Once we ensure the upper method works we could rewrite the latter to use the upper one
 #define sha512_le(data, len, digest) __sha512(data, len, digest, TRUE)
 #define sha512(data, len, digest)    __sha512(data, len, digest, FALSE)
-int __sha512(u8* data, u64 len, sha512_64_t digest, bool use_le) {
-	int blocks_cnt = 0;
-	
-	u8* padded_data = padding(data, len, &blocks_cnt);
-	if (padded_data == NULL) {
-		ERROR_LOG("Failed to pad the data.", kocket_status_str[-blocks_cnt]);
-		return blocks_cnt;
-	}
-	
-	sha512_64_t hash = {0};
-	hash[0] = 0x6A09E667F3BCC908;
-    hash[1] = 0xBB67AE8584CAA73B;
-    hash[2] = 0x3C6EF372FE94F82B;
-    hash[3] = 0xA54FF53A5F1D36F1;
-    hash[4] = 0x510E527FADE682D1;
-    hash[5] = 0x9B05688C2B3E6C1F;
-    hash[6] = 0x1F83D9ABFB41BD6B;
-    hash[7] = 0x5BE0CD19137E2179;
-	
-	for (int i = 0; i < blocks_cnt; ++i) {
-		u64 W[80] = {0};
-
-		mem_cpy(W, padded_data + BLOCK_SIZE_IN_BYTES * i, BLOCK_SIZE_IN_BYTES);
-		for (unsigned int t = 0; t < 16; ++t) KOCKET_BE_CONVERT(W + t, 8);
-		for (unsigned int t = 16; t < 80; ++t) {
-			W[t] = SSIG1(W[t - 2]) + W[t - 7] + SSIG0(W[t - 15]) + W[t - 16];
-		}
-
-		u64 a = hash[0];
-        u64 b = hash[1];
-        u64 c = hash[2];
-        u64 d = hash[3];
-        u64 e = hash[4];
-        u64 f = hash[5];
-        u64 g = hash[6];
-        u64 h = hash[7];
-	
-        for (unsigned int t = 0; t < 80; ++t) {   
-			const u64 T1 = h + BSIG1(e) + CH(e, f, g) + costants[t] + W[t];
-			const u64 T2 = BSIG0(a) + MAJ(a, b, c);
-			h = g;
-			g = f;
-			f = e;
-			e = d + T1;
-			d = c;
-			c = b;
-			b = a;
-			a = T1 + T2;
-		}
-		
-		hash[0] += a;
-		hash[1] += b;
-		hash[2] += c;
-		hash[3] += d;
-		hash[4] += e;
-		hash[5] += f;
-		hash[6] += g;
-		hash[7] += h;
-	}
-	
-	KOCKET_SAFE_FREE(padded_data);
-
-	digest[0] = hash[7];
-	digest[1] = hash[6];
-	digest[2] = hash[5];
-	digest[3] = hash[4];
-	digest[4] = hash[3];
-	digest[5] = hash[2];
-	digest[6] = hash[1];
-	digest[7] = hash[0];
-	
-	if (!use_le) KOCKET_BE_CONVERT(digest, 64);
-
-	return KOCKET_NO_ERROR;
+void __sha512(const u8* data, const u64 len, sha512_64_t digest, const bool use_le) {
+	sha512_ctx ctx = {0};
+	sha512_init(&ctx);
+	sha512_update(&ctx, data, len);
+	__sha512_final(digest, &ctx, use_le);
+	return;
 }
 
-int test_sha512(void) {
-	int ret = 0;
-	sha512_64_t hash = {0};
-	sha512_64_t hash_le = {0};
-	
-	u8 data[] = "abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu";
-	printf("Testing SHA-512:\n");
-	if ((ret = sha512(data, sizeof(data) - 1, hash))) {
-		printf("ERROR::%s: while testing SHA-512.\n", kocket_status_str[-ret]);
-		return ret;
-	}
-
-	if ((ret = sha512_le(data, sizeof(data) - 1, hash_le))) {
-		printf("ERROR::%s: while testing SHA-512.\n", kocket_status_str[-ret]);
-		return ret;
-	}
-
-	static const sha512_t test_sha_le = {
-		0x09, 0xE9, 0x4B, 0x87, 0x5B, 0xE5, 0x96, 0x5E,
-		0x54, 0x26, 0xDD, 0xB6, 0xEE, 0x29, 0xD3, 0xC7,
-		0x3A, 0x43, 0xB5, 0xC4, 0xDE, 0x99, 0x1B, 0x33,
-		0xE4, 0xF7, 0x00, 0x49, 0x9E, 0x28, 0x1D, 0x50,
-		0x18, 0x90, 0x88, 0xB6, 0xAD, 0xAE, 0x99, 0x72,
-		0xA1, 0x7F, 0x9F, 0xEB, 0xC6, 0x79, 0x77, 0x8F,
-		0x3F, 0x14, 0xFC, 0x14, 0x28, 0xF7, 0xF4, 0x8C,
-		0xDA, 0x13, 0xE3, 0xDA, 0x75, 0x9B, 0x95, 0x8E
-	};
-	
-	sha512_t test_sha = {0};
-	mem_cpy(test_sha, test_sha_le, sizeof(sha512_t));
-	KOCKET_BE_CONVERT(test_sha, sizeof(sha512_t));
-
-	if (mem_cmp(hash, test_sha, sizeof(test_sha))) {
-		printf("Failed test sha512.\n");
-		printf("HASHED: \n");
-		PRINT_HASH((u8*) hash);
-		printf("Expected: \n");
-		PRINT_HASH((u8*) test_sha);
-		return 1;
-	}
-
-	PRINT_HASH((u8*) hash);
-	PRINT_HASH((u8*) test_sha);
-	
-	if (mem_cmp(hash_le, test_sha_le, sizeof(test_sha))) {
-		printf("Failed test sha512.\n");
-		printf("HASHED: \n");
-		PRINT_HASH((u8*) hash_le);
-		printf("Expected: \n");
-		PRINT_HASH((u8*) test_sha_le);
-		return 1;
-	}
-
-	PRINT_HASH((u8*) hash_le);
-	PRINT_HASH((u8*) test_sha_le);
-	
-	return 0;
-}
+// -----------------------
+//  Test SHA-512
+// -----------------------
 
 static const u8 test_data[768] = {
 	0xFF, 0xFE, 0xFD, 0xFC, 0xFB, 0xFA, 0xF9, 0xF8,
@@ -493,12 +346,61 @@ static const u8 test_data[768] = {
 	0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01, 0x00
 };
 
-int test_sha512_mul(void) {
-	const unsigned int splits[] = { 127, 2, 1, 128, 17, 300, 193 };
-	sha512_ctx ctx = {0};
+int test_sha512(void) {
+	sha512_64_t hash = {0};
+	sha512_64_t hash_le = {0};
 	
+	const u8 data[] = "abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu";
+	
+	printf("Testing SHA-512:\n");
+	sha512(data, ARR_SIZE(data) - 1, hash);
+	sha512_le(data, ARR_SIZE(data) - 1, hash_le);
+
+	static const sha512_t test_sha_le = {
+		0x09, 0xE9, 0x4B, 0x87, 0x5B, 0xE5, 0x96, 0x5E,
+		0x54, 0x26, 0xDD, 0xB6, 0xEE, 0x29, 0xD3, 0xC7,
+		0x3A, 0x43, 0xB5, 0xC4, 0xDE, 0x99, 0x1B, 0x33,
+		0xE4, 0xF7, 0x00, 0x49, 0x9E, 0x28, 0x1D, 0x50,
+		0x18, 0x90, 0x88, 0xB6, 0xAD, 0xAE, 0x99, 0x72,
+		0xA1, 0x7F, 0x9F, 0xEB, 0xC6, 0x79, 0x77, 0x8F,
+		0x3F, 0x14, 0xFC, 0x14, 0x28, 0xF7, 0xF4, 0x8C,
+		0xDA, 0x13, 0xE3, 0xDA, 0x75, 0x9B, 0x95, 0x8E
+	};
+	
+	sha512_t test_sha = {0};
+	mem_cpy(test_sha, test_sha_le, sizeof(sha512_t));
+	KOCKET_BE_CONVERT(test_sha, sizeof(sha512_t));
+
+	if (mem_cmp(hash, test_sha, sizeof(test_sha))) {
+		printf("Failed test sha512.\n");
+		printf("HASHED: \n");
+		PRINT_HASH((u8*) hash);
+		printf("Expected: \n");
+		PRINT_HASH((u8*) test_sha);
+		return 1;
+	}
+
+	PRINT_HASH((u8*) hash);
+	PRINT_HASH((u8*) test_sha);
+	
+	if (mem_cmp(hash_le, test_sha_le, sizeof(test_sha))) {
+		printf("Failed test sha512.\n");
+		printf("HASHED: \n");
+		PRINT_HASH((u8*) hash_le);
+		printf("Expected: \n");
+		PRINT_HASH((u8*) test_sha_le);
+		return 1;
+	}
+
+	PRINT_HASH((u8*) hash_le);
+	PRINT_HASH((u8*) test_sha_le);
+	
+	printf("\n -------- Test sha512 multi update  ----------\n\n");
+	
+	sha512_ctx ctx = {0};
 	sha512_init(&ctx);
 
+	const unsigned int splits[] = { 127, 2, 1, 128, 17, 300, 193 };
 	unsigned char test_data_be[768] = {0};
 	mem_cpy(test_data_be, test_data, 768);
 	KOCKET_BE_CONVERT(test_data_be, 768);
@@ -506,6 +408,7 @@ int test_sha512_mul(void) {
 	unsigned int offset = 0;
 	for (unsigned int i = 0; i < ARR_SIZE(splits); ++i) {
 		sha512_update(&ctx, test_data_be + offset, splits[i]);
+		PRINT_HASH((u8*) ctx.hash);
 		offset += splits[i];
 	}
 
@@ -515,14 +418,14 @@ int test_sha512_mul(void) {
 	PRINT_HASH((u8*) digest);
 
 	sha512_64_t digest_two = {0};
-	sha512(test_data_be, 768, digest_two);
+	sha512(test_data_be, ARR_SIZE(test_data_be), digest_two);
 	PRINT_HASH((u8*) digest_two);
 
 	if (mem_cmp(digest, digest_two, sizeof(digest))) {
 		WARNING_LOG("digest mismatch");
 		return -1;
 	}
-
+	
 	return KOCKET_NO_ERROR;
 }
 

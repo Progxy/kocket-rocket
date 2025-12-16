@@ -10,7 +10,6 @@
 int main() {
 	int ret = 0;
 	if (test_sha512()) return 1;
-	if (test_sha512_mul()) return 1;
 	
 	printf("\n-----------------------------------------\n\n");
 
