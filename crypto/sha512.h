@@ -350,10 +350,10 @@ int test_sha512(void) {
 	};
 	
 	sha_t test_sha = {0};
-	mem_cpy(test_sha.sha512_t, test_sha_le.sha512_t, sizeof(sha_t));
-	KOCKET_BE_CONVERT(test_sha.sha512_t, sizeof(sha_t));
+	mem_cpy(test_sha.sha512_t, test_sha_le.sha512_t, sizeof(test_sha.sha512_t));
+	KOCKET_BE_CONVERT(test_sha.sha512_t, sizeof(test_sha.sha512_t));
 
-	if (mem_cmp(hash.sha512_t, test_sha.sha512_t, sizeof(test_sha))) {
+	if (mem_cmp(hash.sha512_t, test_sha.sha512_t, sizeof(test_sha.sha512_t))) {
 		printf("Failed test sha512.\n");
 		printf("HASHED: \n");
 		PRINT_HASH(hash);
@@ -365,7 +365,7 @@ int test_sha512(void) {
 	PRINT_HASH(hash);
 	PRINT_HASH(test_sha);
 	
-	if (mem_cmp(hash_le.sha512_t, test_sha_le.sha512_t, sizeof(test_sha))) {
+	if (mem_cmp(hash_le.sha512_t, test_sha_le.sha512_t, sizeof(test_sha_le.sha512_t))) {
 		printf("Failed test sha512.\n");
 		printf("HASHED: \n");
 		PRINT_HASH(hash_le);
@@ -402,7 +402,7 @@ int test_sha512(void) {
 	sha512(test_data_be, KOCKET_ARR_SIZE(test_data_be), &digest_two);
 	PRINT_HASH(digest_two);
 
-	if (mem_cmp(digest.sha512_t, digest_two.sha512_t, sizeof(digest))) {
+	if (mem_cmp(digest.sha512_t, digest_two.sha512_t, sizeof(digest.sha512_t))) {
 		WARNING_LOG("digest mismatch");
 		return -1;
 	}

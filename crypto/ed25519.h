@@ -92,7 +92,7 @@ int sign(Ed25519Signature signature, Ed25519Key priv_key, Ed25519Key pub_key, u8
 	KOCKET_SAFE_FREE(r);
 
 	// For efficiency, do this by first reducing r modulo L, the group order of B.
-	ECMScalar hashed_data_scalar = ecm_mod(ptr_to_scalar(hashed_data.sha512_t, sizeof(hashed_data)), L);
+	ECMScalar hashed_data_scalar = ecm_mod(ptr_to_scalar(hashed_data.sha512_t, sizeof(hashed_data.sha512_t)), L);
 
 	ECMScalar R = {0};
 	ECMPoint temp_point = {0};
@@ -117,7 +117,7 @@ int sign(Ed25519Signature signature, Ed25519Key priv_key, Ed25519Key pub_key, u8
 	ECMScalar S = {0};
 	u8* temp_data[SCALAR_SIZE * 2 + 8] = {0};
 	u8* k_data[SCALAR_SIZE] = {0};
-	BigNum ke_num  = POS_STATIC_BIG_NUM(k.sha512_t, sizeof(k));
+	BigNum ke_num  = POS_STATIC_BIG_NUM(k.sha512_t, sizeof(k.sha512_t));
 	BigNum k_num  = POS_STATIC_BIG_NUM(k_data, sizeof(Ed25519Key));
 	BigNum a_num  = POS_STATIC_BIG_NUM(a, sizeof(Ed25519Key));
 	BigNum l_num  = POS_STATIC_BIG_NUM(L.data, SCALAR_SIZE);
@@ -176,7 +176,7 @@ int verify_signature(Ed25519Key pub_key, Ed25519Signature signature, u8* data, u
 	
 	// Calculate k % L for optimization
 	u8 k_data[SCALAR_SIZE] = {0};
-	BigNum ke_num = POS_STATIC_BIG_NUM(k.sha512_t, sizeof(k));
+	BigNum ke_num = POS_STATIC_BIG_NUM(k.sha512_t, sizeof(k.sha512_t));
 	BigNum k_num = POS_STATIC_BIG_NUM(k_data, SCALAR_SIZE);
 	BigNum l_num  = POS_STATIC_BIG_NUM(L.data, SCALAR_SIZE);
 	if (__chonky_mod(&k_num, &ke_num, &l_num) == NULL) return -KOCKET_IO_ERROR;
