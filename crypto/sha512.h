@@ -5,21 +5,13 @@
 
 // TODO: Refactor/Clean the code...
 
-// Macros Functions
-#if __has_builtin(__builtin_stdc_rotate_right)
-	#define ROTR __builtin_stdc_rotate_right
-#elif __has_builtin(__builtin_rotateright64) 
-	#define ROTR __builtin_rotateright64
-#else
-	#define ROTR(x, r) (((x) >> (r)) | ((x) << (64 - (r))))
-#endif
-
-#define CH(x, y, z)  (((x) & (y)) ^ ((~(x)) & (z)))
-#define MAJ(x, y, z) (((x) & (y)) ^ ((x) & (z)) ^ ((y) & (z)))
-#define BSIG0(x)     (ROTR((x), 28) ^ ROTR((x), 34) ^ ROTR((x), 39))
-#define BSIG1(x)     (ROTR((x), 14) ^ ROTR((x), 18) ^ ROTR((x), 41))
-#define SSIG0(x)     (ROTR((x), 1)  ^ ROTR((x), 8)  ^ ((x) >> 7))
-#define SSIG1(x)     (ROTR((x), 19) ^ ROTR((x), 61) ^ ((x) >> 6))
+// ------------------
+//  Macros Functions
+// ------------------
+#define BSIG0_512(x) (ROTR((x), 28) ^ ROTR((x), 34) ^ ROTR((x), 39))
+#define BSIG1_512(x) (ROTR((x), 14) ^ ROTR((x), 18) ^ ROTR((x), 41))
+#define SSIG0_512(x) (ROTR((x), 1)  ^ ROTR((x), 8)  ^ ((x) >> 7))
+#define SSIG1_512(x) (ROTR((x), 19) ^ ROTR((x), 61) ^ ((x) >> 6))
 
 // -----------------------
 //  Function Declarations
@@ -45,7 +37,7 @@ static const sha_fn sha512_fn = {
 	.sha = sha512
 };
 
-static const u64 costants[] = {
+static const u64 costants_512[] = {
 	0x428A2F98D728AE22, 0x7137449123EF65CD, 0xB5C0FBCFEC4D3B2F, 0xE9B5DBA58189DBBC,
 	0x3956C25BF348B538, 0x59F111F1B605D019, 0x923F82A4AF194F9B, 0xAB1C5ED5DA6D8118,
 	0xD807AA98A3030242, 0x12835B0145706FBE, 0x243185BE4EE4B28C, 0x550C7DC3D5FFB4E2,
@@ -94,7 +86,7 @@ static void process_block(sha_ctx* ctx) {
 	mem_cpy(W, ctx -> msg_block, SHA512_BLOCK_SIZE_IN_BYTES);
 	for (unsigned int t = 0; t < 16; ++t) KOCKET_BE_CONVERT(W + t, 8);
 	for (unsigned int t = 16; t < 80; ++t) {
-		W[t] = SSIG1(W[t - 2]) + W[t - 7] + SSIG0(W[t - 15]) + W[t - 16];
+		W[t] = SSIG1_512(W[t - 2]) + W[t - 7] + SSIG0_512(W[t - 15]) + W[t - 16];
 	}
 
 	u64 a = (ctx -> hash.sha512_64_t)[0];
@@ -107,8 +99,8 @@ static void process_block(sha_ctx* ctx) {
 	u64 h = (ctx -> hash.sha512_64_t)[7];
 
 	for (unsigned int t = 0; t < 80; ++t) {   
-		const u64 T1 = h + BSIG1(e) + CH(e, f, g) + costants[t] + W[t];
-		const u64 T2 = BSIG0(a) + MAJ(a, b, c);
+		const u64 T1 = h + BSIG1_512(e) + CH(e, f, g) + costants_512[t] + W[t];
+		const u64 T2 = BSIG0_512(a) + MAJ(a, b, c);
 		h = g;
 		g = f;
 		f = e;
@@ -138,12 +130,15 @@ static void process_block(sha_ctx* ctx) {
 static void pad_block(sha_ctx* ctx) {
 	u64 last_block_len = ctx -> msg_block_size;
 	u64 k = (896 - ((ctx -> msg_block_size * 8 + 1) % SHA512_BLOCK_SIZE)) % SHA512_BLOCK_SIZE;
-	unsigned int blocks_cnt = (last_block_len * 8 + 1 + k + 128) / SHA512_BLOCK_SIZE;
+	unsigned int blocks_cnt = (last_block_len * 8 + 1 + k + SHA512_BLOCK_SIZE_IN_BYTES) / SHA512_BLOCK_SIZE;
 	ctx -> msg_block_size = blocks_cnt * SHA512_BLOCK_SIZE_IN_BYTES;
 	
 	(ctx -> msg_block)[last_block_len] = 0x80;
 	
-	((u64*) (ctx -> msg_block))[ctx -> msg_block_size / 8 - 1] = ctx -> total_msg_size * 8;	
+	u128 l = ctx -> total_msg_size * 8;
+	((u64*) (ctx -> msg_block))[ctx -> msg_block_size / 8 - 2] = (l >> 64) & 0xFFFFFFFFFFFFFFFF;	
+	((u64*) (ctx -> msg_block))[ctx -> msg_block_size / 8 - 1] = l & 0xFFFFFFFFFFFFFFFF;	
+	KOCKET_BE_CONVERT(((u64*) (ctx -> msg_block)) + (ctx -> msg_block_size / 8 - 2), 8);
 	KOCKET_BE_CONVERT(((u64*) (ctx -> msg_block)) + (ctx -> msg_block_size / 8 - 1), 8);
 
 	return;
@@ -227,7 +222,6 @@ void sha512(const u8* data, const u64 len, sha_t* digest) {
 // -----------------------
 //  Test SHA-512
 // -----------------------
-
 static const u8 test_data[768] = {
 	0xFF, 0xFE, 0xFD, 0xFC, 0xFB, 0xFA, 0xF9, 0xF8,
 	0xF7, 0xF6, 0xF5, 0xF4, 0xF3, 0xF2, 0xF1, 0xF0,

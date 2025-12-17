@@ -10,6 +10,7 @@
 int main() {
 	int ret = 0;
 	if (test_sha512()) return 1;
+	if (test_sha256()) return 1;
 	
 	printf("\n-----------------------------------------\n\n");
 
