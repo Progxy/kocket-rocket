@@ -44,7 +44,7 @@ static int copy_byte_string(ByteString* dest, const ByteString src) {
 }
 
 // NOTE: key and text will be considered Big-Endian
-static int hmac_sha(sha_64_t digest, const ByteString key, const ByteString text, const sha_fn sha_fn) {	
+static int hmac_sha(sha_t* digest, const ByteString key, const ByteString text, const sha_fn sha_fn) {	
 	int err = 0;
 	ByteString key_c = {0};
 	
@@ -59,9 +59,9 @@ static int hmac_sha(sha_64_t digest, const ByteString key, const ByteString text
 	
 	// If key is longer than 64 bytes reset it to key = sha512(key)
 	if (key_c.len > sha_fn.block_size) {
-		sha_64_t tk = {0};
-		sha_fn.sha(key_c.data, key_c.len, tk);
-		mem_cpy(key_c.data, tk, sha_fn.digest_size);
+		sha_t tk = {0};
+		sha_fn.sha(key_c.data, key_c.len, &tk);
+		mem_cpy(key_c.data, tk.ptr, sha_fn.digest_size);
 		key_c.len = sha_fn.digest_size;
 	}
 
@@ -83,7 +83,7 @@ static int hmac_sha(sha_64_t digest, const ByteString key, const ByteString text
 	
 	sha_fn.sha_init(&context);                   
 	sha_fn.sha_update(&context, k_opad.data, k_opad.len);     
-	sha_fn.sha_update(&context, (u8*) digest, sha_fn.digest_size);     
+	sha_fn.sha_update(&context, digest -> ptr, sha_fn.digest_size);     
 	sha_fn.sha_final(digest, &context);          
 	
 	return KOCKET_NO_ERROR;

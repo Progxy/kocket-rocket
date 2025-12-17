@@ -7,7 +7,7 @@
 #define _KOCKET_NO_PERROR_SUPPORT_
 #include "../kocket_utils.h"
 #include "./chacha20.h"
-#include "./sha512.h"
+#include "./common_sha.h"
 #include "./ecm_ops.h"
 
 /* Reference: [RFC 8032](https://datatracker.ietf.org/doc/html/rfc8032) */
@@ -41,13 +41,13 @@ void generate_priv_key(Ed25519Key priv_key) {
 }
 
 int generate_pub_key(Ed25519Key pub_key, Ed25519Key priv_key) {
-	sha512_t h = {0};
+	sha_t h = {0};
 
 	KOCKET_BE_CONVERT(priv_key, sizeof(Ed25519Key));
-	sha512(priv_key, sizeof(Ed25519Key), (u64*) h);
+	sha512(priv_key, sizeof(Ed25519Key), &h);
 	KOCKET_BE_CONVERT(priv_key, sizeof(Ed25519Key));
 
-	mem_cpy(pub_key, h, sizeof(Ed25519Key));
+	mem_cpy(pub_key, h.sha512_t, sizeof(Ed25519Key));
 	
 	// Prune the buffer
 	pub_key[0] &= ~(0x07);
@@ -69,13 +69,13 @@ int generate_pub_key(Ed25519Key pub_key, Ed25519Key priv_key) {
 int sign(Ed25519Signature signature, Ed25519Key priv_key, Ed25519Key pub_key, u8* data, u64 len) {
 	if ((data == NULL && len != 0) || signature == NULL) return -KOCKET_INVALID_PARAMETERS;
 	
-	sha512_t h = {0};
+	sha_t h = {0};
 	KOCKET_BE_CONVERT(priv_key, sizeof(Ed25519Key));
-	sha512(priv_key, sizeof(Ed25519Key), (u64*) h);
+	sha512(priv_key, sizeof(Ed25519Key), &h);
 	KOCKET_BE_CONVERT(priv_key, sizeof(Ed25519Key));
 	
 	Ed25519Key a = {0};
-	mem_cpy(a, h, sizeof(Ed25519Key));
+	mem_cpy(a, h.sha512_t, sizeof(Ed25519Key));
 	
 	// Prune the buffer
 	a[0] &= ~(0x07);
@@ -83,16 +83,16 @@ int sign(Ed25519Signature signature, Ed25519Key priv_key, Ed25519Key pub_key, u8
 	a[31] |= 0x40;
 	
 	u64 r_len = 0;
-	u8* r = concat(4, &r_len, h + 32, 32, data, len);
+	u8* r = concat(4, &r_len, h.sha512_t + 32, 32, data, len);
 	if (r == NULL) return -KOCKET_IO_ERROR;
 	
-	sha512_t hashed_data = {0};
-	sha512(r, r_len, (u64*) hashed_data);
+	sha_t hashed_data = {0};
+	sha512(r, r_len, &hashed_data);
 	
 	KOCKET_SAFE_FREE(r);
 
 	// For efficiency, do this by first reducing r modulo L, the group order of B.
-	ECMScalar hashed_data_scalar = ecm_mod(ptr_to_scalar(hashed_data, sizeof(hashed_data)), L);
+	ECMScalar hashed_data_scalar = ecm_mod(ptr_to_scalar(hashed_data.sha512_t, sizeof(hashed_data)), L);
 
 	ECMScalar R = {0};
 	ECMPoint temp_point = {0};
@@ -108,8 +108,8 @@ int sign(Ed25519Signature signature, Ed25519Key priv_key, Ed25519Key pub_key, u8
 	KOCKET_BE_CONVERT(K, sizeof(Ed25519Key));
 	KOCKET_BE_CONVERT(K + sizeof(Ed25519Key), sizeof(Ed25519Key));
 	
-	sha512_t k = {0};
-	sha512(K, K_len, (u64*) k);
+	sha_t k = {0};
+	sha512(K, K_len, &k);
 	
 	KOCKET_SAFE_FREE(K);
 
@@ -117,7 +117,7 @@ int sign(Ed25519Signature signature, Ed25519Key priv_key, Ed25519Key pub_key, u8
 	ECMScalar S = {0};
 	u8* temp_data[SCALAR_SIZE * 2 + 8] = {0};
 	u8* k_data[SCALAR_SIZE] = {0};
-	BigNum ke_num  = POS_STATIC_BIG_NUM(k, sizeof(k));
+	BigNum ke_num  = POS_STATIC_BIG_NUM(k.sha512_t, sizeof(k));
 	BigNum k_num  = POS_STATIC_BIG_NUM(k_data, sizeof(Ed25519Key));
 	BigNum a_num  = POS_STATIC_BIG_NUM(a, sizeof(Ed25519Key));
 	BigNum l_num  = POS_STATIC_BIG_NUM(L.data, SCALAR_SIZE);
@@ -169,14 +169,14 @@ int verify_signature(Ed25519Key pub_key, Ed25519Signature signature, u8* data, u
 	KOCKET_BE_CONVERT(K, sizeof(Ed25519Key));
 	KOCKET_BE_CONVERT(K + sizeof(Ed25519Key), sizeof(Ed25519Key));
 	
-	sha512_t k = {0};
-	sha512(K, K_len, (u64*) k);
+	sha_t k = {0};
+	sha512(K, K_len, &k);
 	
 	KOCKET_SAFE_FREE(K);
 	
 	// Calculate k % L for optimization
 	u8 k_data[SCALAR_SIZE] = {0};
-	BigNum ke_num = POS_STATIC_BIG_NUM(k, sizeof(k));
+	BigNum ke_num = POS_STATIC_BIG_NUM(k.sha512_t, sizeof(k));
 	BigNum k_num = POS_STATIC_BIG_NUM(k_data, SCALAR_SIZE);
 	BigNum l_num  = POS_STATIC_BIG_NUM(L.data, SCALAR_SIZE);
 	if (__chonky_mod(&k_num, &ke_num, &l_num) == NULL) return -KOCKET_IO_ERROR;

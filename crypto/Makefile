@@ -1,4 +1,4 @@
-FLAGS = -std=gnu11 -Wall -Wextra -pedantic -ggdb
+FLAGS = -std=gnu11 -Wall -Wextra -pedantic -ggdb #-fsanitize=undefined -fsanitize=address -O2
 DEFINITIONS = -D_DEBUG -Wno-unused-parameter
 
 test: test.c chacha20.h sha512.h ed25519.h x25519.h poly1305.h

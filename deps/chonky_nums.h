@@ -104,10 +104,16 @@ STATIC_ASSERT(sizeof(s64) == 8, "s64 must be 8 bytes");
 #endif //_CHONKY_NUMS_PRINTING_UTILS_
 
 #define SAFE_FREE(ptr) do { if ((ptr) != NULL) { free(ptr); (ptr) = NULL; } } while (0) 
-#define CAST_PTR(ptr, type) ((type*) (ptr))
-#define MAX(a, b) ((a) > (b) ? (a) : (b)) 
-#define MIN(a, b) ((a) < (b) ? (a) : (b)) 
 #define ARR_SIZE(arr) (sizeof(arr) / sizeof(*(arr)))
+#define CAST_PTR(ptr, type) ((type*) (ptr))
+
+#ifndef MAX
+	#define MAX(a, b) ((a) > (b) ? (a) : (b)) 
+#endif //MAX
+
+#ifndef MIN
+	#define MIN(a, b) ((a) < (b) ? (a) : (b)) 
+#endif //MIN
 
 #ifdef _CHONKY_NUMS_UTILS_IMPLEMENTATION_
 

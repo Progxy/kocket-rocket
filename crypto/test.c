@@ -5,7 +5,7 @@
 #include "ed25519.h"
 #include "poly1305.h"
 #include "hkdf.h"
-#include "sha512.h"
+#include "common_sha.h"
 
 int main() {
 	int ret = 0;

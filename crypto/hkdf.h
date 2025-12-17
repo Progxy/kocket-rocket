@@ -7,24 +7,6 @@
 #include "../kocket_utils.h"
 #include "hmac.h"
 
-static int hkdf_sha_extract(sha_64_t prk, const ByteString salt, const ByteString ikm, const sha_fn sha_fn) {
-    u8 t_salt_data[MAX_SHA_BLOCK_SIZE] = {0};
-	ByteString t_salt = { .data = t_salt_data, .len = sha_fn.digest_size };
-	if (salt.data != NULL) {
-		mem_cpy(t_salt.data, salt.data, salt.len);
-		KOCKET_BE_CONVERT(t_salt.data, t_salt.len);
-	}
-
-	KOCKET_BE_CONVERT(ikm.data, ikm.len);
-	
-	int err = 0;
-	if ((err = hmac_sha(prk, t_salt, ikm, sha_fn))) return err;
-
-	KOCKET_BE_CONVERT(ikm.data, ikm.len);
-
-	return KOCKET_NO_ERROR;
-}
-
 static u64 bytes_len(const u8* val, const u64 len) {
 	u64 bytes_len = len;
 	for (s64 i = len - 1; i >= 0 && val[i] == 0; --i, --bytes_len);
@@ -44,7 +26,25 @@ static void extend_string(u8** str, u64* size, const u8* str_to_add, const u64 s
 	return;
 }
 
-static int hkdf_sha_expand(u8* result, const sha_64_t prk, const ByteString info, const u64 length, const sha_fn sha_fn) {
+static int hkdf_sha_extract(sha_t* prk, const ByteString salt, const ByteString ikm, const sha_fn sha_fn) {
+    u8 t_salt_data[MAX_SHA_BLOCK_SIZE] = {0};
+	ByteString t_salt = { .data = t_salt_data, .len = sha_fn.digest_size };
+	if (salt.data != NULL) {
+		mem_cpy(t_salt.data, salt.data, salt.len);
+		KOCKET_BE_CONVERT(t_salt.data, t_salt.len);
+	}
+
+	KOCKET_BE_CONVERT(ikm.data, ikm.len);
+	
+	int err = 0;
+	if ((err = hmac_sha(prk, t_salt, ikm, sha_fn))) return err;
+
+	KOCKET_BE_CONVERT(ikm.data, ikm.len);
+
+	return KOCKET_NO_ERROR;
+}
+
+static int hkdf_sha_expand(u8* result, const sha_t* prk, const ByteString info, const u64 length, const sha_fn sha_fn) {
     if (length > (255 * sha_fn.digest_size)) {
         WARNING_LOG("Requested key length too long");
 		return -KOCKET_INVALID_LENGTH;
@@ -52,26 +52,26 @@ static int hkdf_sha_expand(u8* result, const sha_64_t prk, const ByteString info
 
     ByteString okm = {0};
 	
-	sha_64_t t = {0};
+	sha_t t = {0};
 	u64 t_size = 0;
     u64 counter = 1;
 	int err = 0;
 
-	const ByteString prk_str = { .data = (u8*) prk, .len = sha_fn.digest_size };
+	const ByteString prk_str = { .data = (u8*) prk -> ptr, .len = sha_fn.digest_size };
 	KOCKET_BE_CONVERT(info.data, info.len);
 
     while (okm.len < length) {
 		u64 counter_len = bytes_len((u8*) &counter, 8);
 
 		ByteString concatenation = {0};
-		concatenation.data = concat(6, &(concatenation.len), t, t_size, info.data, info.len, &counter, counter_len);
+		concatenation.data = concat(6, &(concatenation.len), t.ptr, t_size, info.data, info.len, &counter, counter_len);
         if (concatenation.data == NULL) {
 			FREE_BYTE_STRING(okm);
 			WARNING_LOG("Failed to allocate concatenation buffer.");
 			return -KOCKET_IO_ERROR;
 		}
 		
-		if ((err = hmac_sha(t, prk_str, concatenation, sha_fn))) {
+		if ((err = hmac_sha(&t, prk_str, concatenation, sha_fn))) {
 			FREE_BYTE_STRING(okm);
 			FREE_BYTE_STRING(concatenation);
 			return err;
@@ -81,7 +81,7 @@ static int hkdf_sha_expand(u8* result, const sha_64_t prk, const ByteString info
 		
 		FREE_BYTE_STRING(concatenation);
 
-		extend_string(&(okm.data), &(okm.len), (u8*) t, t_size);
+		extend_string(&(okm.data), &(okm.len), t.ptr, t_size);
         if (okm.data == NULL) {
 			WARNING_LOG("Failed to extend okm buffer.");
 			return -KOCKET_IO_ERROR;
@@ -100,9 +100,9 @@ static int hkdf_sha_expand(u8* result, const sha_64_t prk, const ByteString info
 
 static int hkdf_sha(u8* result, const ByteString ikm, const u64 length, const ByteString salt, const ByteString info, const sha_fn sha_fn) {
 	int err = 0;
-	sha_64_t prk = {0};
-	if ((err = hkdf_sha_extract(prk, salt, ikm, sha_fn))) return err;
-	if ((err = hkdf_sha_expand(result, prk, info, length, sha_fn))) return err;
+	sha_t prk = {0};
+	if ((err = hkdf_sha_extract(&prk, salt, ikm, sha_fn))) return err;
+	if ((err = hkdf_sha_expand(result, &prk, info, length, sha_fn))) return err;
 	return KOCKET_NO_ERROR;
 }
 
@@ -163,8 +163,30 @@ int test_hkdf(void) {
     ByteString aead_key = SLICE_BYTE_STRING(key_material, 12, 44);
     ByteString aead_nonce = SLICE_BYTE_STRING(key_material, 0, 12);
 
+	const u8 aead_key_data[] = {
+		0xE8, 0x19, 0x28, 0xB9, 0x90, 0xF3, 0x69, 0xCF,
+	   	0xE8, 0x57, 0xFB, 0x61, 0x0B, 0xC1, 0xE6, 0x3E, 
+		0xBA, 0xDC, 0xBD, 0x4A, 0xAF, 0x0A, 0x40, 0x72, 
+		0x83, 0x9C, 0x48, 0x03, 0x4E, 0xD8, 0x21, 0x09
+	};
+
+	const u8 aead_nonce_data[] = {
+		0x90, 0xB2, 0x7D, 0xB3, 0x12, 0xE6, 
+		0x30, 0xF0, 0xB1, 0xD4, 0xA8, 0x49
+	};
+
     PRINT_BYTE_STRING(aead_key);
 	PRINT_BYTE_STRING(aead_nonce);
+
+	if (mem_cmp(aead_key.data, aead_key_data, sizeof(aead_key_data))) {
+		WARNING_LOG("mismatch aead_key");
+		return 1;
+	}
+
+	if (mem_cmp(aead_nonce.data, aead_nonce_data, sizeof(aead_nonce_data))) {
+		WARNING_LOG("mismatch aead_key");
+		return 1;
+	}
 	
 	return KOCKET_NO_ERROR;
 }
