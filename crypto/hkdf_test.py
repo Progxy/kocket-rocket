@@ -7,13 +7,7 @@ def hkdf_extract(salt: bytes, ikm: bytes, hash_fn=hashlib.sha256) -> bytes:
     """
     if salt is None: salt = b"\x00" * hash_fn().digest_size
     
-    print(f"salt: {salt.hex().upper()}\nikm: {ikm.hex().upper()}")
-
-    res = hmac.new(salt, ikm, hash_fn).digest()
-    
-    print(f"res: {res.hex().upper()}")
-
-    return res
+    return hmac.new(salt, ikm, hash_fn).digest()
 
 def hkdf_expand(prk: bytes, info: bytes, length: int, hash_fn=hashlib.sha256) -> bytes:
     """
@@ -28,9 +22,11 @@ def hkdf_expand(prk: bytes, info: bytes, length: int, hash_fn=hashlib.sha256) ->
     counter = 1
 
     while len(okm) < length:
-        t = hmac.new(prk, t + info + bytes([counter]), hash_fn).digest()
+        concat = t + info + bytes([counter])
+        t = hmac.new(prk, concat, hash_fn).digest()
         okm += t
         counter += 1
+        print(f"prk: {prk.hex().upper()}\nconcat: {concat.hex().upper()}\nt: {t.hex().upper()}\nokm: {okm.hex().upper()}")
 
     return okm[:length]
 
@@ -51,6 +47,8 @@ if __name__ == "__main__":
         recipient_x25519_pub +
         sequence_number.to_bytes(8, "little")
     )
+
+    print(f"info: {info.hex().upper()}")
 
     key_material = hkdf(
         ikm=shared_secret,

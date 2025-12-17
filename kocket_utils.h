@@ -225,7 +225,7 @@ static u8* concat(u64 len, u64* size, ...) {
 
 	u8* concatenation = kocket_calloc(*size, 1);
 	if (concatenation == NULL) {
-		WARNING_LOG("Failed to allocate concatentation buffer.");
+		WARNING_LOG("Failed to allocate concatentation buffer of %llu bytes.", *size);
 		return NULL;
 	}
     

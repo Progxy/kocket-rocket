@@ -13,6 +13,7 @@
 
 // Constant Values
 #define BLOCK_SIZE 			1024
+#define DIGEST_SIZE         64
 #define BLOCK_SIZE_IN_BYTES 128
 
 // Macros Functions
@@ -31,15 +32,50 @@
 #define SSIG0(x)     (ROTR((x), 1)  ^ ROTR((x), 8)  ^ ((x) >> 7))
 #define SSIG1(x)     (ROTR((x), 19) ^ ROTR((x), 61) ^ ((x) >> 6))
 
+// TODO: Those two typedef should be revised and put in a common_sha.h type of header
 typedef u8 sha512_t[64];
 typedef u64 sha512_64_t[8];
-typedef struct sha512_ctx {
+
+typedef struct sha_ctx {
 	sha512_64_t hash;
 	u8 msg_block[BLOCK_SIZE_IN_BYTES * 2];
 	u64 msg_block_size;
 	bool is_finished;
 	u64 total_msg_size;
-} sha512_ctx;
+} sha_ctx;
+
+// TODO: Those two typedef should be revised and put in a common_sha.h type of header
+typedef sha512_64_t sha_64_t;
+typedef struct sha_fn {
+	u64 digest_size;
+	u64 block_size;
+	void (*sha_init)     (sha_ctx* ctx);
+	int  (*sha_update)   (sha_ctx* ctx, const u8* data, const u64 len);
+	int  (*sha_final)    (sha_64_t digest, sha_ctx* ctx);
+	int  (*sha_final_le) (sha_64_t digest, sha_ctx* ctx);
+	void (*sha_le)       (const u8* data, const u64 len, sha_64_t digest);
+	void (*sha)          (const u8* data, const u64 len, sha_64_t digest);
+} sha_fn;
+
+// Function Declarations
+
+void sha512_init(sha_ctx* ctx);
+int sha512_update(sha_ctx* ctx, const u8* data, const u64 len);
+int sha512_final(sha512_64_t digest, sha_ctx* ctx);
+int sha512_final_le(sha512_64_t digest, sha_ctx* ctx);
+void sha512_le(const u8* data, const u64 len, sha512_64_t digest);
+void sha512(const u8* data, const u64 len, sha512_64_t digest);
+
+static const sha_fn sha512_fn = {
+	.digest_size = DIGEST_SIZE,
+	.block_size = BLOCK_SIZE_IN_BYTES,
+	.sha_init = sha512_init,
+	.sha_update = sha512_update,
+	.sha_final = sha512_final,
+	.sha_final_le = sha512_final_le,
+	.sha_le = sha512_le,
+	.sha = sha512
+};
 
 static const u64 costants[] = {
 	0x428A2F98D728AE22, 0x7137449123EF65CD, 0xB5C0FBCFEC4D3B2F, 0xE9B5DBA58189DBBC,
@@ -80,7 +116,7 @@ static void print_hash(const char* name, const u8* hash) {
 }
 
 #define PRINT_SHA_CTX(ctx) print_sha_ctx(#ctx, ctx)
-UNUSED_FUNCTION static void print_sha_ctx(const char* name, const sha512_ctx ctx) {
+UNUSED_FUNCTION static void print_sha_ctx(const char* name, const sha_ctx ctx) {
 	printf("---- SHA-CTX %s: ------\n", name);
 	
 	PRINT_HASH((u8*) ctx.hash);
@@ -103,7 +139,7 @@ UNUSED_FUNCTION static void print_sha_ctx(const char* name, const sha512_ctx ctx
 	return;
 }
 
-void sha512_init(sha512_ctx* ctx) {
+void sha512_init(sha_ctx* ctx) {
 	mem_set(ctx -> hash, 0, sizeof(sha512_64_t));
 
 	(ctx -> hash)[0] = 0x6A09E667F3BCC908;
@@ -123,7 +159,7 @@ void sha512_init(sha512_ctx* ctx) {
 	return;
 }
 
-static void process_block(sha512_ctx* ctx) {
+static void process_block(sha_ctx* ctx) {
 	u64 W[80] = {0};
 
 	mem_cpy(W, ctx -> msg_block, BLOCK_SIZE_IN_BYTES);
@@ -170,7 +206,7 @@ static void process_block(sha512_ctx* ctx) {
 	return;
 }
 
-static void pad_block(sha512_ctx* ctx) {
+static void pad_block(sha_ctx* ctx) {
 	u64 last_block_len = ctx -> msg_block_size;
 	u64 k = (896 - ((ctx -> msg_block_size * 8 + 1) % BLOCK_SIZE)) % BLOCK_SIZE;
 	unsigned int blocks_cnt = (last_block_len * 8 + 1 + k + 128) / BLOCK_SIZE;
@@ -184,7 +220,7 @@ static void pad_block(sha512_ctx* ctx) {
 	return;
 }
 
-int sha512_update(sha512_ctx* ctx, const u8* data, const u64 len) {
+int sha512_update(sha_ctx* ctx, const u8* data, const u64 len) {
 	if (ctx -> is_finished) return -KOCKET_UPDATING_FINISHED_CTX;
 
 	u64 copied_size = MIN(len, BLOCK_SIZE_IN_BYTES - ctx -> msg_block_size);
@@ -208,9 +244,9 @@ int sha512_update(sha512_ctx* ctx, const u8* data, const u64 len) {
 	return KOCKET_NO_ERROR;
 }
 
-#define sha512_final_le(digest, ctx) __sha512_final(digest, ctx, TRUE)
-#define sha512_final(digest, ctx)    __sha512_final(digest, ctx, FALSE)
-void __sha512_final(sha512_64_t digest, sha512_ctx* ctx, const bool use_le) {
+static int __sha512_final(sha512_64_t digest, sha_ctx* ctx, const bool use_le) {
+	if (ctx -> is_finished) return -KOCKET_UPDATING_FINISHED_CTX;
+	
 	pad_block(ctx);
 	
 	do {
@@ -230,18 +266,35 @@ void __sha512_final(sha512_64_t digest, sha512_ctx* ctx, const bool use_le) {
 	
 	ctx -> is_finished = TRUE;
 
-	return;
+	return KOCKET_NO_ERROR;
 }
 
-#define sha512_le(data, len, digest) __sha512(data, len, digest, TRUE)
-#define sha512(data, len, digest)    __sha512(data, len, digest, FALSE)
-void __sha512(const u8* data, const u64 len, sha512_64_t digest, const bool use_le) {
-	sha512_ctx ctx = {0};
+int sha512_final_le(sha512_64_t digest, sha_ctx* ctx) {
+   	return __sha512_final(digest, ctx, TRUE);
+}
+
+int sha512_final(sha512_64_t digest, sha_ctx* ctx) {
+	return __sha512_final(digest, ctx, FALSE);
+}
+
+static void __sha512(const u8* data, const u64 len, sha512_64_t digest, const bool use_le) {
+	sha_ctx ctx = {0};
 	sha512_init(&ctx);
 	sha512_update(&ctx, data, len);
 	__sha512_final(digest, &ctx, use_le);
 	return;
 }
+
+void sha512_le(const u8* data, const u64 len, sha512_64_t digest) {
+	__sha512(data, len, digest, TRUE);
+	return;
+}
+
+void sha512(const u8* data, const u64 len, sha512_64_t digest) {
+	__sha512(data, len, digest, FALSE);
+	return;
+}
+
 
 // -----------------------
 //  Test SHA-512
@@ -397,7 +450,7 @@ int test_sha512(void) {
 	
 	printf("\n -------- Test sha512 multi update  ----------\n\n");
 	
-	sha512_ctx ctx = {0};
+	sha_ctx ctx = {0};
 	sha512_init(&ctx);
 
 	const unsigned int splits[] = { 127, 2, 1, 128, 17, 300, 193 };

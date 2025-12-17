@@ -24,14 +24,8 @@ def hmac_generic(key: bytes, message: bytes, hash_func):
     ipad = bytes((k ^ 0x36) for k in key)
     opad = bytes((k ^ 0x5c) for k in key)
 
-    print(f"ipad: {ipad.hex().upper()}\nopad: {opad.hex().upper()}")
-
-    print(f"spms(len: {len(ipad + message)}): {(ipad + message).hex().upper()}")
-
     # Step 4: Inner hash
     inner_hash = hash_func(ipad + message).digest()
-
-    print(f"inner_hash: {inner_hash.hex().upper()}")
 
     # Step 5: Outer hash
     return hash_func(opad + inner_hash).digest()
