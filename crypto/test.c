@@ -55,8 +55,16 @@ int main() {
 	
 	printf("\n-----------------------------------------\n\n");
 	
+	printf("Testing CHACHA20:\n");
+	if ((ret = test_chacha20())) {
+		printf("ERROR::%s: while testing CHACHA20.\n", kocket_status_str[-ret]);
+		return ret;
+	}
+	
+	printf("\n-----------------------------------------\n\n");
+	
 	printf("Testing POLY1305:\n");
-	if ((ret = poly1305(NULL))) {
+	if ((ret = test_poly1305(NULL, 0))) {
 		printf("ERROR::%s: while testing POLY1305.\n", kocket_status_str[-ret]);
 		return ret;
 	}

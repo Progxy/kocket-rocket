@@ -21,6 +21,8 @@
 #define CH(x, y, z)  (((x) & (y)) ^ ((~(x)) & (z)))
 #define MAJ(x, y, z) (((x) & (y)) ^ ((x) & (z)) ^ ((y) & (z)))
 
+// TODO: sha256 and sha512 could be merged, so that it would also be easier for
+// implementing the two remaining hash algorithms
 typedef enum ShaSizes {
 	SHA512_BLOCK_SIZE          = 1024,
 	SHA512_DIGEST_SIZE         = 64,

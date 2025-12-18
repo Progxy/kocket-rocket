@@ -43,6 +43,15 @@
 	a += b; d ^= a; d <<= 8;      \
 	c += d; b ^= c; b <<= 7;
 
+// TODO: Clean up and refactor a bit....
+typedef u8 cct_key_t[256];
+typedef u64 cct_key_64_t[64];
+typedef u8 cct_nonce_t[96];
+typedef u32 cct_nonce_32_t[24];
+typedef u8 cct_rand_t[64];
+
+#define CHACHA20_BLOCK_SIZE 64
+
 /* -------------------------------------------------------------------------------------------------------- */
 // ------------------------ 
 //  Functions Declarations
@@ -51,8 +60,8 @@ static inline void is_rdseed_supported(void);
 static inline void is_rdrand_supported(void);
 NO_INLINE static u64 get_rand64(void);
 NO_INLINE static u32 get_seed32(void);
-void cha_cha20_randomize(u8 key[256], u8 nonce[96], u8 random_data[64]);
-u8* cha_cha20(u8 random_data[64]);
+void chacha20_block(const cct_key_t key, const u32 counter, const cct_nonce_t nonce, cct_rand_t random_data);
+u8* cha_cha20(cct_rand_t random_data);
 
 /* -------------------------------------------------------------------------------------------------------- */
 // ------------------ 
@@ -131,17 +140,17 @@ NO_INLINE static u64 get_rand64(void) {
 	return previous_rand;
 }
 
-void cha_cha20_randomize(u8 key[256], u8 nonce[96], u8 random_data[64]) {
-	static u32 block_count = 0;
+// TODO: Test and use mem_cpy instead of for loops
+void chacha20_block(const cct_key_t key, const u32 counter, const cct_nonce_t nonce, cct_rand_t random_data) {
 	u32 chacha_initial_vector[16] = {0};
 	
 	// Init the initial state vector
 	chacha_initial_vector[0] = 0x61707865;
-	chacha_initial_vector[1] = 0x3320646e;
-    chacha_initial_vector[2] = 0x79622d32; 
-	chacha_initial_vector[3] = 0x6b206574;
+	chacha_initial_vector[1] = 0x3320646E;
+    chacha_initial_vector[2] = 0x79622D32; 
+	chacha_initial_vector[3] = 0x6B206574;
 	for (u8 i = 0; i < 8; ++i) chacha_initial_vector[i + 4] = ((u32*) key)[i];	
-	chacha_initial_vector[12] = block_count;
+	chacha_initial_vector[12] = counter;
 	for (u8 i = 0; i < 3; ++i) chacha_initial_vector[i + 13] = ((u32*) nonce)[i];
 
 	u32 chacha_working_vector[16] = {0};
@@ -159,18 +168,17 @@ void cha_cha20_randomize(u8 key[256], u8 nonce[96], u8 random_data[64]) {
 	}
 
 	for (u8 i = 0; i < 16; ++i) chacha_initial_vector[i] += chacha_working_vector[i];
-	mem_cpy(random_data, chacha_initial_vector, 64 * sizeof(u8));
-
-	// Update the block count
-	block_count++;
+	mem_cpy(random_data, chacha_initial_vector, 64);
 
 	return;
 }
 
-u8* cha_cha20(u8 random_data[64]) {
-	u64 key[64] = {0};
-	u32 nonce[24] = {0};
-	mem_set(random_data, 0, 64 * sizeof(u8));
+// TODO: Rename into chacha20_randomize
+u8* cha_cha20(cct_rand_t random_data) {
+	static u32 block_count = 0;
+	cct_key_64_t key = {0};
+	cct_nonce_32_t nonce = {0};
+	mem_set(random_data, 0, 64);
 
 	is_rdseed_supported();
     is_rdrand_supported();
@@ -187,9 +195,46 @@ u8* cha_cha20(u8 random_data[64]) {
 		if (i < 24) nonce[i] = get_seed32();
 	}
 
-	cha_cha20_randomize((u8*) key, (u8*) nonce, random_data);
+	chacha20_block((u8*) key, block_count, (u8*) nonce, random_data);
+
+	// Update the block count
+	block_count++;
 
 	return random_data; 
+}
+
+u8* chacha20_encrypt(const cct_key_t key, const u32 counter, const cct_nonce_t nonce, const u8* plaintext, const u64 plaintext_size) {
+	u8* encrypted_message = kocket_calloc(plaintext_size, sizeof(u8));
+	if (encrypted_message == NULL) {
+		WARNING_LOG("Failed to allocate the encrypted_message buffer with size (%llu).", plaintext_size);
+		return NULL;
+	}
+	
+	u64 j = 0;
+	u64 encrypted_message_idx = 0;
+	for (j = 0; j < (plaintext_size / 64); ++j) {
+		cct_rand_t key_stream = {0};
+		chacha20_block(key, counter + j, nonce, key_stream);
+		for (unsigned int i = 0; i < CHACHA20_BLOCK_SIZE; ++i) {
+			encrypted_message[encrypted_message_idx++] = plaintext[j * 64 + i] ^ key_stream[i];
+		}
+	}
+
+	const unsigned int leftover = plaintext_size % 64;
+	if (leftover) {
+		cct_rand_t key_stream = {0};
+		chacha20_block(key, counter + j, nonce, key_stream);
+		for (unsigned int i = 0; i < leftover; ++i) {
+			encrypted_message[encrypted_message_idx++] = plaintext[j * 64 + i] ^ key_stream[i];
+		}
+	}
+	
+	return encrypted_message;
+}
+
+int test_chacha20(void) {
+	TODO("Implement me with RFC Test Vectors");
+	return -KOCKET_TODO;
 }
 
 #endif // _CHACHA20_H_

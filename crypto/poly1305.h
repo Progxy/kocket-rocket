@@ -10,7 +10,7 @@
 
 /* Reference [RFC 8439](https://datatracker.ietf.org/doc/html/rfc8439) */
 
-int poly1305(u8* data) {
+int test_poly1305(u8* data, u64 size) {
 	TODO("implement me.");
 	return -KOCKET_TODO;
 }
