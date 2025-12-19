@@ -35,7 +35,7 @@ void print_signature(const char* name, const Ed25519Signature signature) {
 
 void generate_priv_key(Ed25519Key priv_key) {
 	u8 random_data[64] = {0};
-	cha_cha20(random_data);
+	chacha20_randomize(random_data);
 	mem_cpy(priv_key, random_data, sizeof(Ed25519Key));
 	return;
 }

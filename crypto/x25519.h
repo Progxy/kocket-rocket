@@ -174,7 +174,7 @@ void x25519(x25519Scalar res, const x25519Scalar scalar_bytes, const x25519Scala
 
 static void random_32_bytes(u8 random_bytes[32]) {
 	u8 random_data[64] = {0};
-	mem_cpy(random_bytes, cha_cha20(random_data), 32);
+	mem_cpy(random_bytes, chacha20_randomize(random_data), 32);
 	return;
 }
 

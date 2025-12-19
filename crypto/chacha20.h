@@ -61,8 +61,8 @@ static inline void is_rdrand_supported(void);
 NO_INLINE static u64 get_rand64(void);
 NO_INLINE static u32 get_seed32(void);
 void chacha20_block(const cct_key_t key, const u32 counter, const cct_nonce_t nonce, cct_rand_t random_data);
-u8* cha_cha20(cct_rand_t random_data);
-void chacha20_encrypt(u8* encrypted_message, const cct_key_t key, const u32 counter, const cct_nonce_t nonce, const u8* plaintext, const u64 plaintext_size);
+u8* chacha20_randomize(cct_rand_t random_data);
+u8* chacha20_encrypt(u8* encrypted_message, const cct_key_t key, const u32 counter, const cct_nonce_t nonce, const u8* plaintext, const u64 plaintext_size);
 
 /* -------------------------------------------------------------------------------------------------------- */
 // ------------------ 
@@ -141,7 +141,6 @@ NO_INLINE static u64 get_rand64(void) {
 	return previous_rand;
 }
 
-// TODO: Test and use mem_cpy instead of for loops
 void chacha20_block(const cct_key_t key, const u32 counter, const cct_nonce_t nonce, cct_rand_t random_data) {
 	u32 chacha_initial_vector[16] = {0};
 	
@@ -150,12 +149,12 @@ void chacha20_block(const cct_key_t key, const u32 counter, const cct_nonce_t no
 	chacha_initial_vector[1] = 0x3320646E;
     chacha_initial_vector[2] = 0x79622D32; 
 	chacha_initial_vector[3] = 0x6B206574;
-	for (u8 i = 0; i < 8; ++i) chacha_initial_vector[i + 4] = ((u32*) key)[i];	
+	mem_cpy(chacha_initial_vector + 4, key, sizeof(cct_key_t));
 	chacha_initial_vector[12] = counter;
-	for (u8 i = 0; i < 3; ++i) chacha_initial_vector[i + 13] = ((u32*) nonce)[i];
+	mem_cpy(chacha_initial_vector + 13, nonce, sizeof(cct_nonce_t));
 
 	u32 chacha_working_vector[16] = {0};
-	for (u8 i = 0; i < 16; ++i) chacha_working_vector[i] = chacha_initial_vector[i];
+	mem_cpy(chacha_working_vector, chacha_initial_vector, sizeof(chacha_working_vector));
 
 	for (u8 i = 0; i < 10; ++i) {
 		QUARTER_ROUND(chacha_working_vector[0], chacha_working_vector[4], chacha_working_vector[8], chacha_working_vector[12]);
@@ -174,8 +173,7 @@ void chacha20_block(const cct_key_t key, const u32 counter, const cct_nonce_t no
 	return;
 }
 
-// TODO: Rename into chacha20_randomize
-u8* cha_cha20(cct_rand_t random_data) {
+u8* chacha20_randomize(cct_rand_t random_data) {
 	static u32 block_count = 0;
 	cct_key_64_t key = {0};
 	cct_nonce_32_t nonce = {0};
@@ -183,6 +181,7 @@ u8* cha_cha20(cct_rand_t random_data) {
 
 	is_rdseed_supported();
     is_rdrand_supported();
+	
 	if (!rdrand_support) {
         WARNING_LOG("CHACHA20: RDRAND is UNSUPPORTED.");
         if (!rdseed_support) WARNING_LOG("CHACHA20: RDSEED is UNSUPPORTED.");
@@ -204,7 +203,7 @@ u8* cha_cha20(cct_rand_t random_data) {
 	return random_data; 
 }
 
-void chacha20_encrypt(u8* encrypted_message, const cct_key_t key, const u32 counter, const cct_nonce_t nonce, const u8* plaintext, const u64 plaintext_size) {
+u8* chacha20_encrypt(u8* encrypted_message, const cct_key_t key, const u32 counter, const cct_nonce_t nonce, const u8* plaintext, const u64 plaintext_size) {
 	u64 j = 0;
 	u64 encrypted_message_idx = 0;
 	for (j = 0; j < (plaintext_size / 64); ++j) {
@@ -224,7 +223,7 @@ void chacha20_encrypt(u8* encrypted_message, const cct_key_t key, const u32 coun
 		}
 	}
 	
-	return; 
+	return encrypted_message; 
 }
 
 int test_chacha20(void) {
