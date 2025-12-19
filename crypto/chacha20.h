@@ -44,10 +44,10 @@
 	c += d; b ^= c; b <<= 7;
 
 // TODO: Clean up and refactor a bit....
-typedef u8 cct_key_t[256];
-typedef u64 cct_key_64_t[64];
-typedef u8 cct_nonce_t[96];
-typedef u32 cct_nonce_32_t[24];
+typedef u8 cct_key_t[32];
+typedef u64 cct_key_64_t[4];
+typedef u8 cct_nonce_t[12];
+typedef u32 cct_nonce_32_t[3];
 typedef u8 cct_rand_t[64];
 
 #define CHACHA20_BLOCK_SIZE 64
@@ -62,6 +62,7 @@ NO_INLINE static u64 get_rand64(void);
 NO_INLINE static u32 get_seed32(void);
 void chacha20_block(const cct_key_t key, const u32 counter, const cct_nonce_t nonce, cct_rand_t random_data);
 u8* cha_cha20(cct_rand_t random_data);
+void chacha20_encrypt(u8* encrypted_message, const cct_key_t key, const u32 counter, const cct_nonce_t nonce, const u8* plaintext, const u64 plaintext_size);
 
 /* -------------------------------------------------------------------------------------------------------- */
 // ------------------ 
@@ -203,13 +204,7 @@ u8* cha_cha20(cct_rand_t random_data) {
 	return random_data; 
 }
 
-u8* chacha20_encrypt(const cct_key_t key, const u32 counter, const cct_nonce_t nonce, const u8* plaintext, const u64 plaintext_size) {
-	u8* encrypted_message = kocket_calloc(plaintext_size, sizeof(u8));
-	if (encrypted_message == NULL) {
-		WARNING_LOG("Failed to allocate the encrypted_message buffer with size (%llu).", plaintext_size);
-		return NULL;
-	}
-	
+void chacha20_encrypt(u8* encrypted_message, const cct_key_t key, const u32 counter, const cct_nonce_t nonce, const u8* plaintext, const u64 plaintext_size) {
 	u64 j = 0;
 	u64 encrypted_message_idx = 0;
 	for (j = 0; j < (plaintext_size / 64); ++j) {
@@ -229,7 +224,7 @@ u8* chacha20_encrypt(const cct_key_t key, const u32 counter, const cct_nonce_t n
 		}
 	}
 	
-	return encrypted_message;
+	return; 
 }
 
 int test_chacha20(void) {

@@ -267,6 +267,18 @@ static char* reverse_str(char* str) {
     return str;
 }
 
+UNUSED_FUNCTION static u64 bytes_len(const u8* val, const u64 len) {
+	u64 bytes_len = len;
+	for (s64 i = len - 1; i >= 0 && val[i] == 0; --i, --bytes_len);
+	return bytes_len;
+}
+
+UNUSED_FUNCTION static inline u64 __ceil(u64 a, u64 b) {
+	u64 c = (a - (a % b)) / b;
+	if (a % b) c++;
+	return c;
+}
+
 #endif // _KOCKET_UTILS_IMPLEMENTATION_
 
 /* -------------------------------------------------------------------------------------------------------- */
@@ -289,6 +301,7 @@ typedef enum KocketStatus {
 	KOCKET_INVALID_SHARED_SECRET,
 	KOCKET_INVALID_LENGTH,
 	KOCKET_UPDATING_FINISHED_CTX,
+	KOCKET_FAILED_OPERATION,
 	KOCKET_TODO 
 } KocketStatus;
 
@@ -310,6 +323,7 @@ static const char* kocket_status_str[] = {
 	"KOCKET_INVALID_SHARED_SECRET",
 	"KOCKET_INVALID_LENGTH",
 	"KOCKET_UPDATING_FINISHED_CTX",
+	"KOCKET_FAILED_OPERATION",
 	"KOCKET_TODO"
 };
 

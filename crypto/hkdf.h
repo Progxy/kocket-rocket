@@ -7,12 +7,6 @@
 #include "../kocket_utils.h"
 #include "hmac.h"
 
-static u64 bytes_len(const u8* val, const u64 len) {
-	u64 bytes_len = len;
-	for (s64 i = len - 1; i >= 0 && val[i] == 0; --i, --bytes_len);
-	return bytes_len;
-}
-
 static void extend_string(u8** str, u64* size, const u8* str_to_add, const u64 size_str_to_add) {
 	*str = kocket_realloc(*str, *size + size_str_to_add);
 	if (*str == NULL) {
