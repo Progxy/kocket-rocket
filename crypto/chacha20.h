@@ -170,6 +170,17 @@ UNUSED_FUNCTION static void print_cct_state(const cct_state_t state, const char*
 	return;
 }
 
+#define PRINT_CCT_CIPHER(cipher, len) print_cct_cipher(cipher, len, #cipher)
+UNUSED_FUNCTION static void print_cct_cipher(const u8* cipher, const u64 len, const char* name) {
+	printf("%s:\n", name);
+	for (s64 i = len - 1, j = 0; i >= 0; --i, ++j) {
+		if (j % 8 == 0) printf("%03llu: ", j);
+		printf("%02X%c", cipher[i], j % 8 == 7 ? '\n' : ' ');
+	}
+	printf("\n%c", len % 8 ? '\n' : ' ');
+	return;
+}
+
 static inline void quarter_round(u32* a, u32* b, u32* c, u32* d) {
 	*a += *b; *d ^= *a; *d = ROTL(*d, 16); 
 	*c += *d; *b ^= *c; *b = ROTL(*b, 12);
@@ -246,14 +257,18 @@ u8* chacha20_randomize(cct_rand_t random_data) {
 	return random_data; 
 }
 
+/// NOTE: The plaintext is expected to be in big endian format (while the result is in little-endian)
 u8* chacha20_encrypt(u8* encrypted_message, const cct_key_t key, const u32 counter, const cct_nonce_t nonce, const u8* plaintext, const u64 plaintext_size) {
+	mem_cpy(encrypted_message, plaintext, plaintext_size);
+
 	u64 j = 0;
 	u64 encrypted_message_idx = 0;
-	for (j = 0; j < (plaintext_size / 64); ++j) {
+	for (j = 0; j < (plaintext_size - (plaintext_size % 64)) / 64; ++j) {
 		cct_rand_t key_stream = {0};
 		chacha20_block(key, counter + j, nonce, key_stream);
+		KOCKET_BE_CONVERT(key_stream, sizeof(cct_rand_t));
 		for (unsigned int i = 0; i < CHACHA20_BLOCK_SIZE; ++i) {
-			encrypted_message[encrypted_message_idx++] = plaintext[j * 64 + i] ^ key_stream[i];
+			encrypted_message[encrypted_message_idx++] ^= key_stream[i];
 		}
 	}
 
@@ -262,10 +277,12 @@ u8* chacha20_encrypt(u8* encrypted_message, const cct_key_t key, const u32 count
 		cct_rand_t key_stream = {0};
 		chacha20_block(key, counter + j, nonce, key_stream);
 		for (unsigned int i = 0; i < leftover; ++i) {
-			encrypted_message[encrypted_message_idx++] = plaintext[j * 64 + i] ^ key_stream[i];
+			encrypted_message[encrypted_message_idx++] ^= key_stream[sizeof(cct_rand_t) - i - 1];
 		}
 	}
 	
+	KOCKET_BE_CONVERT(encrypted_message, plaintext_size);
+
 	return encrypted_message; 
 }
 
@@ -299,18 +316,76 @@ int test_chacha20(void) {
 	};
 
 	cct_rand_t rd = {0};
-	printf("Test chacha20_block:\n");
+	printf("Test chacha20_block: ");
 	chacha20_block(key, 1, nonce, rd);
 	
-	if (mem_cmp(rd, rd_exp, sizeof(rd))) {
+	if (mem_cmp(rd, rd_exp, sizeof(cct_rand_t))) {
 		PRINT_CCT_RAND(rd);
 		PRINT_CCT_RAND(rd_exp);
 		WARNING_LOG("Failed testing chacha20_block.");
 		return 1;
 	}
+	
+	printf("Test Passed!\n");
 
-	TODO("Implement me with RFC Test Vectors");
-	return -KOCKET_TODO;
+	const u8 test_cipher[114] = {
+		0x4D, 0x87, 0x42, 0x5E, 0x78, 0xF2, 0xED, 0x8E,
+	   	0x0B, 0xB4, 0xE6, 0x5B, 0xA3, 0x74, 0xBF, 0x0B, 
+		0xF9, 0x5A, 0x36, 0x37, 0x79, 0xB7, 0x1A, 0xE9, 
+		0x8C, 0x81, 0x06, 0xF8, 0xCC, 0x16, 0x4D, 0x51,
+	   	0xBC, 0x52, 0x5E, 0xB6, 0x22, 0x8A, 0x08, 0x8E, 
+		0xA3, 0x56, 0x61, 0x6A, 0x0D, 0x50, 0xBF, 0x0D, 
+		0xCA, 0x07, 0xD8, 0x61, 0x08, 0x9F, 0x35, 0x0C, 
+		0x53, 0x8F, 0xAB, 0x52, 0x51, 0xE6, 0x24, 0xD6, 
+		0x39, 0x16, 0x57, 0xB3, 0x62, 0xCD, 0xAB, 0x3D, 
+		0x59, 0x8F, 0xAB, 0x33, 0x47, 0x52, 0xC5, 0x65,
+	   	0x1B, 0xF9, 0x0B, 0xAE, 0x9F, 0xFD, 0xCC, 0xAF, 
+		0x27, 0x0A, 0xC2, 0x60, 0x43, 0x1D, 0xEC, 0x7A, 
+		0x7E, 0xE9, 0x81, 0x69, 0x0D, 0xDD, 0x28, 0x07, 
+		0xBA, 0x41, 0x80, 0xF9, 0x68, 0x25, 0x9A, 0x35, 
+		0x2E, 0x6E
+	};
+	
+	const cct_nonce_t nonce_cript = {
+		0x00, 0x00, 0x00, 0x00,
+	   	0x00, 0x00, 0x00, 0x4A,
+		0x00, 0x00, 0x00, 0x00
+	};
+	const u32 counter = 1;
+	
+	const u8 plaintext[115] = "Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it.";
+	const u64 plaintext_size = KOCKET_ARR_SIZE(plaintext) - 1;
+	u8 encrypted_message[114] = {0};
+
+	printf("Test chacha20_encrypt: ");
+	chacha20_encrypt(encrypted_message, key, counter, nonce_cript, plaintext, plaintext_size);
+
+	if (mem_cmp(encrypted_message, test_cipher, KOCKET_ARR_SIZE(test_cipher))) {
+		PRINT_CCT_CIPHER(encrypted_message, plaintext_size);
+		PRINT_CCT_CIPHER(test_cipher, plaintext_size);
+		WARNING_LOG("Failed testing chacha20_encrypt.");
+		return 1;
+	}
+
+	printf("Test Passed!\n");
+
+	KOCKET_BE_CONVERT(encrypted_message, plaintext_size);
+
+	u8 decrypted_message[115] = {0};
+	printf("Testing decrypting with chacha20_encrypt: ");
+	chacha20_encrypt(decrypted_message, key, counter, nonce_cript, encrypted_message, plaintext_size);
+	KOCKET_BE_CONVERT(decrypted_message, plaintext_size);
+
+	if (mem_cmp(decrypted_message, plaintext, plaintext_size)) {
+		printf("original: \'%s\'\n", (const char*) plaintext);
+		printf("original: \'%s\'\n", (const char*) decrypted_message);
+		WARNING_LOG("Failed testing decrypting with chacha20_encrypt.");
+		return 1;
+	}
+
+	printf("Test Passed!\n");
+
+	return KOCKET_NO_ERROR;
 }
 
 #endif // _CHACHA20_H_
