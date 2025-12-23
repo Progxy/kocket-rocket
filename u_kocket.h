@@ -207,7 +207,7 @@ int kocket_write(KocketPacketEntry* kocket_packet, bool update_req_id) {
 	
 	if (update_req_id) {
 		u8 initialization_vector[64] = {0};
-		kocket_packet -> kocket_packet.req_id = *KOCKET_CAST_PTR(cha_cha20(initialization_vector), u64);
+		kocket_packet -> kocket_packet.req_id = *KOCKET_CAST_PTR(chacha20_randomize(initialization_vector), u64);
 	}
 
 	int err = 0;

@@ -144,6 +144,7 @@ NO_INLINE static u64 get_rand64(void) {
 	return previous_rand;
 }
 
+#ifndef _K_KOCKET_H_
 #define PRINT_CCT_RAND(rand) print_cct_rand(rand, #rand)
 static void print_cct_rand(const cct_rand_t rand, const char* name) {
 	printf("%s: ", name);
@@ -180,6 +181,8 @@ UNUSED_FUNCTION static void print_cct_cipher(const u8* cipher, const u64 len, co
 	printf("\n%c", len % 8 ? '\n' : ' ');
 	return;
 }
+
+#endif //_K_KOCKET_H_
 
 static inline void quarter_round(u32* a, u32* b, u32* c, u32* d) {
 	*a += *b; *d ^= *a; *d = ROTL(*d, 16); 
@@ -286,6 +289,7 @@ u8* chacha20_encrypt(u8* encrypted_message, const cct_key_t key, const u32 count
 	return encrypted_message; 
 }
 
+#ifndef _K_KOCKET_H_
 int test_chacha20(void) {
 	const cct_key_t key = {
 		0x1C, 0x1D, 0x1E, 0x1F,
@@ -387,6 +391,7 @@ int test_chacha20(void) {
 
 	return KOCKET_NO_ERROR;
 }
+#endif //_K_KOCKET_H_
 
 #endif // _CHACHA20_H_
 
