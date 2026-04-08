@@ -100,12 +100,12 @@ static int kocket_init_connection(ServerKocket* kocket) {
 	kocket -> sock_addr.sin_addr.s_addr = htonl(kocket -> address);
 	
 	const struct proto_ops* kocket_sock_ops = kocket -> socket -> ops;
-	if ((err = kocket_sock_ops -> bind(kocket -> socket, (struct sockaddr*) &(kocket -> sock_addr), sizeof(kocket -> sock_addr))) < 0) {
+	if ((err = (kocket_sock_ops -> bind)(kocket -> socket, (struct sockaddr_unsized*) &(kocket -> sock_addr), sizeof(kocket -> sock_addr))) < 0) {
 		PERROR_LOG("An error occurred while binding the socket", err);
 		return -KOCKET_IO_ERROR;
 	}
 
-	if ((err = kocket_sock_ops -> listen(kocket -> socket, kocket -> backlog)) < 0) {
+	if ((err = (kocket_sock_ops -> listen)(kocket -> socket, kocket -> backlog)) < 0) {
 		PERROR_LOG("An error occurred while trying to listen on the socket", err);
 		return -KOCKET_IO_ERROR;
 	}
